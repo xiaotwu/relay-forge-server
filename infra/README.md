@@ -11,8 +11,8 @@ make deploy-up
 make deploy-migrate
 ```
 
-The Docker path remains available here for the extracted backend project, but binary packaging is
-the primary release target.
+The Docker path remains available in this backend repo, but binary packaging is the primary release
+target.
 
 ## Included Assets
 

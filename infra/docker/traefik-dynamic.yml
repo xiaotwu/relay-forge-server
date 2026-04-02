@@ -1,0 +1,91 @@
+http:
+  routers:
+    websocket:
+      rule: 'PathPrefix(`/ws`)'
+      entryPoints:
+        - websecure
+      service: realtime
+      middlewares:
+        - security-headers
+
+    media:
+      rule: 'PathPrefix(`/api/v1/media/`)'
+      entryPoints:
+        - websecure
+      service: media
+      middlewares:
+        - security-headers
+        - rate-limit
+
+    voice:
+      rule: 'PathPrefix(`/api/v1/voice/`)'
+      entryPoints:
+        - websecure
+      service: media
+      middlewares:
+        - security-headers
+        - rate-limit
+
+    api:
+      rule: 'PathPrefix(`/api/v1/`)'
+      entryPoints:
+        - websecure
+      service: api
+      middlewares:
+        - security-headers
+        - rate-limit
+
+    healthz:
+      rule: 'Path(`/healthz`)'
+      entryPoints:
+        - websecure
+      service: api
+
+  services:
+    api:
+      loadBalancer:
+        servers:
+          - url: 'http://api:8080'
+        healthCheck:
+          path: /healthz
+          interval: 10s
+          timeout: 5s
+
+    realtime:
+      loadBalancer:
+        servers:
+          - url: 'http://realtime:8081'
+        healthCheck:
+          path: /healthz
+          interval: 10s
+          timeout: 5s
+
+    media:
+      loadBalancer:
+        servers:
+          - url: 'http://media:8082'
+        healthCheck:
+          path: /healthz
+          interval: 10s
+          timeout: 5s
+
+  middlewares:
+    security-headers:
+      headers:
+        frameDeny: true
+        contentTypeNosniff: true
+        browserXssFilter: true
+        referrerPolicy: 'strict-origin-when-cross-origin'
+        permissionsPolicy: 'camera=(), microphone=(self), geolocation=()'
+        customResponseHeaders:
+          Strict-Transport-Security: 'max-age=31536000; includeSubDomains'
+
+    rate-limit:
+      rateLimit:
+        average: 30
+        burst: 50
+        period: 1s
+
+    max-body:
+      buffering:
+        maxRequestBodyBytes: 52428800

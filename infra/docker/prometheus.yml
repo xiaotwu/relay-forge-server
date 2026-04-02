@@ -1,0 +1,69 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+
+scrape_configs:
+  - job_name: 'api'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['api:9090']
+        labels:
+          service: api
+          environment: production
+
+  - job_name: 'realtime'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['realtime:9090']
+        labels:
+          service: realtime
+          environment: production
+
+  - job_name: 'media'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['media:9090']
+        labels:
+          service: media
+          environment: production
+
+  - job_name: 'worker'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['worker:9090']
+        labels:
+          service: worker
+          environment: production
+
+  - job_name: 'postgres'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+        labels:
+          service: postgres
+          environment: production
+
+  - job_name: 'valkey'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['valkey-exporter:9121']
+        labels:
+          service: valkey
+          environment: production
+
+  - job_name: 'nginx'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['nginx-exporter:9113']
+        labels:
+          service: nginx
+          environment: production
+
+  - job_name: 'livekit'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['livekit:7880']
+        labels:
+          service: livekit
+          environment: production

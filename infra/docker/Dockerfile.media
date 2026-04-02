@@ -1,0 +1,26 @@
+FROM golang:1.23-alpine AS builder
+
+RUN apk add --no-cache git ca-certificates
+
+WORKDIR /build
+
+COPY services/media/go.mod ./services/media/
+COPY services/media/ ./services/media/
+RUN cd services/media && go mod download
+
+ARG VERSION=dev
+ARG BUILD_TIME
+
+RUN mkdir -p /out && cd services/media && CGO_ENABLED=0 go build \
+    -ldflags "-s -w -X main.version=${VERSION} -X main.buildTime=${BUILD_TIME}" \
+    -o /out/media ./cmd/media
+
+FROM alpine:3.20
+
+RUN apk add --no-cache ca-certificates wget
+
+COPY --from=builder /out/media /usr/local/bin/media
+
+EXPOSE 8082
+
+ENTRYPOINT ["media"]

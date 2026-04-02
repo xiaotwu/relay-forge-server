@@ -1,0 +1,26 @@
+FROM golang:1.23-alpine AS builder
+
+RUN apk add --no-cache git ca-certificates
+
+WORKDIR /build
+
+COPY services/realtime/go.mod ./services/realtime/
+COPY services/realtime/ ./services/realtime/
+RUN cd services/realtime && go mod download
+
+ARG VERSION=dev
+ARG BUILD_TIME
+
+RUN cd services/realtime && CGO_ENABLED=0 go build \
+    -ldflags "-s -w -X main.version=${VERSION} -X main.buildTime=${BUILD_TIME}" \
+    -o /realtime ./cmd/realtime
+
+FROM alpine:3.20
+
+RUN apk add --no-cache ca-certificates wget
+
+COPY --from=builder /realtime /usr/local/bin/realtime
+
+EXPOSE 8081
+
+ENTRYPOINT ["realtime"]

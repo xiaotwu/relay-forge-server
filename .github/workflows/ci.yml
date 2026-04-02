@@ -1,0 +1,111 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: backend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-test-build:
+    name: Lint, Test, Build
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: relayforge
+          POSTGRES_PASSWORD: testpassword
+          POSTGRES_DB: relayforge_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U relayforge"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      valkey:
+        image: valkey/valkey:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache-dependency-path: |
+            services/api/go.sum
+            services/realtime/go.sum
+            services/media/go.sum
+            services/worker/go.sum
+
+      - name: golangci-lint api
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          working-directory: services/api
+
+      - name: golangci-lint realtime
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          working-directory: services/realtime
+
+      - name: golangci-lint media
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          working-directory: services/media
+
+      - name: golangci-lint worker
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          working-directory: services/worker
+
+      - name: Test API service
+        run: cd services/api && go test -race -cover -coverprofile=coverage.out ./...
+        env:
+          DB_HOST: localhost
+          DB_PORT: '5432'
+          DB_USER: relayforge
+          DB_PASSWORD: testpassword
+          DB_NAME: relayforge_test
+          VALKEY_HOST: localhost
+          VALKEY_PORT: '6379'
+
+      - name: Test Realtime service
+        run: cd services/realtime && go test -race -cover -coverprofile=coverage.out ./...
+        env:
+          VALKEY_HOST: localhost
+          VALKEY_PORT: '6379'
+
+      - name: Test Media service
+        run: cd services/media && go test -race -cover -coverprofile=coverage.out ./...
+        env:
+          VALKEY_HOST: localhost
+          VALKEY_PORT: '6379'
+
+      - name: Test Worker service
+        run: cd services/worker && go test -race -cover -coverprofile=coverage.out ./...
+        env:
+          DB_HOST: localhost
+          DB_PORT: '5432'
+          DB_USER: relayforge
+          DB_PASSWORD: testpassword
+          DB_NAME: relayforge_test
+          VALKEY_HOST: localhost
+          VALKEY_PORT: '6379'
+
+      - name: Build binaries
+        run: make build-go

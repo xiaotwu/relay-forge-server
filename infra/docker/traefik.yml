@@ -1,0 +1,50 @@
+api:
+  dashboard: true
+  insecure: false
+
+entryPoints:
+  web:
+    address: ':80'
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+
+  websecure:
+    address: ':443'
+    http:
+      tls:
+        certResolver: letsencrypt
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: admin@relayforge.example.com
+      storage: /letsencrypt/acme.json
+      httpChallenge:
+        entryPoint: web
+
+providers:
+  file:
+    filename: /etc/traefik/dynamic.yml
+    watch: true
+
+log:
+  level: INFO
+  format: json
+
+accessLog:
+  format: json
+  filters:
+    statusCodes:
+      - '400-599'
+
+metrics:
+  prometheus:
+    entryPoint: websecure
+    addEntryPointsLabels: true
+    addServicesLabels: true
+
+ping:
+  entryPoint: websecure

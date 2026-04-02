@@ -1,0 +1,69 @@
+{
+    # Global options
+    email admin@relayforge.example.com
+    # Automatic HTTPS is enabled by default
+}
+
+relayforge.example.com {
+    # Encode responses with gzip and zstd
+    encode zstd gzip
+
+    # Security headers
+    header {
+        X-Frame-Options "SAMEORIGIN"
+        X-Content-Type-Options "nosniff"
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "camera=(), microphone=(self), geolocation=()"
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        -Server
+    }
+
+    # WebSocket endpoint for realtime service
+    @websocket {
+        path /ws
+        path /ws/*
+    }
+    reverse_proxy @websocket realtime:8081
+
+    # Media service endpoints
+    @media {
+        path /api/v1/media/*
+    }
+    reverse_proxy @media media:8082 {
+        flush_interval -1
+        transport http {
+            read_timeout 120s
+        }
+    }
+
+    # Voice service endpoints
+    @voice {
+        path /api/v1/voice/*
+    }
+    reverse_proxy @voice media:8082
+
+    # API service endpoints
+    @api {
+        path /api/v1/*
+        path /healthz
+    }
+    reverse_proxy @api api:8080 {
+        transport http {
+            read_timeout 30s
+        }
+    }
+
+    # Request body size limit (50 MB)
+    request_body {
+        max_size 50MB
+    }
+
+    # Access log
+    log {
+        output file /var/log/caddy/access.log {
+            roll_size 100mb
+            roll_keep 5
+        }
+    }
+}

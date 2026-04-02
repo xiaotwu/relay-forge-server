@@ -1,0 +1,27 @@
+FROM golang:1.23-alpine AS builder
+
+RUN apk add --no-cache git ca-certificates
+
+WORKDIR /build
+
+COPY services/api/go.mod ./services/api/
+COPY services/api/ ./services/api/
+RUN cd services/api && go mod download
+
+ARG VERSION=dev
+ARG BUILD_TIME
+
+RUN cd services/api && CGO_ENABLED=0 go build \
+    -ldflags "-s -w -X main.version=${VERSION} -X main.buildTime=${BUILD_TIME}" \
+    -o /api ./cmd/api
+
+FROM alpine:3.20
+
+RUN apk add --no-cache ca-certificates wget
+
+COPY --from=builder /api /usr/local/bin/api
+COPY services/api/internal/database/migrations /migrations
+
+EXPOSE 8080
+
+ENTRYPOINT ["api"]

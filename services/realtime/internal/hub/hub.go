@@ -242,7 +242,9 @@ func (h *Hub) validateToken(tokenStr string) (uuid.UUID, error) {
 func (c *Client) readPump() {
 	defer func() {
 		c.hub.unregister <- c
-		c.conn.Close()
+		if err := c.conn.Close(); err != nil {
+			log.Warn().Err(err).Str("user_id", c.userID.String()).Msg("failed to close websocket connection")
+		}
 	}()
 
 	c.conn.SetReadLimit(maxMessageSize)
@@ -281,7 +283,9 @@ func (c *Client) writePump() {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
 		ticker.Stop()
-		c.conn.Close()
+		if err := c.conn.Close(); err != nil {
+			log.Warn().Err(err).Str("user_id", c.userID.String()).Msg("failed to close websocket connection")
+		}
 	}()
 
 	for {

@@ -1,4 +1,6 @@
-# RelayForge Server
+<p align="center">
+  <img src="./assets/relay-forge-wordmark.png" alt="RelayForge" width="460" />
+</p>
 
 RelayForge Server is the backend repository for the RelayForge platform. It contains the Go
 services, deployment assets, and release automation for the runtime stack.

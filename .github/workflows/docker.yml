@@ -3,7 +3,12 @@ name: Backend Docker Build & Push
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
+  workflow_dispatch:
+
+concurrency:
+  group: backend-docker-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io

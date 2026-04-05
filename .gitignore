@@ -1,1 +1,32 @@
 .DS_Store
+
+# Environment
+.env
+.env.local
+.env.*.local
+!.env.example
+!.env.*.example
+
+# Build outputs
+bin/
+release/
+dist/
+build/
+target/
+
+# Go
+*.test
+*.out
+coverage.out
+coverage.html
+
+# Logs
+*.log
+logs/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

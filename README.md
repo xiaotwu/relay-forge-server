@@ -1,35 +1,35 @@
-# RelayForge Backend
+# RelayForge Server
 
-This repository contains the standalone RelayForge backend project.
+RelayForge Server is the backend repository for the RelayForge platform. It contains the Go
+services, deployment assets, and release automation for the runtime stack.
 
-## Contents
+If you are looking for the full architecture, operations, security, and release handbook, go to
+[`xiaotwu.github.io/relay-forge`](https://xiaotwu.github.io/relay-forge/#/server). The public docs
+are intentionally published from the main [`relay-forge`](https://github.com/xiaotwu/relay-forge)
+repository.
 
-- `services/` - API, realtime, media, and worker services
-- `infra/` - backend deployment assets
-- `docs/` - backend architecture and operations notes
-- `scripts/` - backend maintenance helpers
-- `.github/workflows/` - backend CI and release workflows
+## Components
 
-## Goals
+- `services/api` - REST API, auth, RBAC, guild and message persistence
+- `services/realtime` - WebSocket delivery, presence, and fan-out
+- `services/media` - uploads, storage coordination, and LiveKit integration
+- `services/worker` - background jobs and retention tasks
+- `infra/docker` - self-hosted deployment assets
 
-- Build and test independently from the client repository
-- Support direct binary deployment as the primary release path
-- Retain Docker support inside this backend project only
-- Keep the backend repository self-contained
-
-## Quick Start
+## Quickstart
 
 ```bash
 cp .env.example .env
 make test
 make build
+make deploy-up
+make deploy-migrate
 ```
 
-## Published Docs
+## Releases
 
-The shared RelayForge handbook is published from the client repo's GitHub Pages site:
+- Git tags publish backend binary archives to GitHub Releases.
+- Container images publish to GitHub Container Registry on tagged releases.
+- Detailed release flow and deployment notes live in the shared handbook.
 
-- `https://xiaotwu.github.io/relay-forge/#/server`
-
-See `infra/README.md` for backend deployment assets and `docs/` for architecture and operations
-guides.
+This repository is licensed under the [Apache-2.0 License](./LICENSE).

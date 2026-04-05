@@ -1,0 +1,68 @@
+name: Backend Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish backend binaries
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: relayforge
+          POSTGRES_PASSWORD: testpassword
+          POSTGRES_DB: relayforge_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U relayforge"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      valkey:
+        image: valkey/valkey:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache-dependency-path: |
+            services/api/go.sum
+            services/realtime/go.sum
+            services/media/go.sum
+            services/worker/go.sum
+
+      - name: Run backend tests
+        run: make test
+        env:
+          DB_HOST: localhost
+          DB_PORT: "5432"
+          DB_USER: relayforge
+          DB_PASSWORD: testpassword
+          DB_NAME: relayforge_test
+          VALKEY_HOST: localhost
+          VALKEY_PORT: "6379"
+
+      - name: Package backend binaries
+        run: make package-binaries
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: release/*.zip

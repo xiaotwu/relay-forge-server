@@ -203,7 +203,6 @@ func (r *GuildRepository) ListAll(ctx context.Context, limit, offset int) ([]mod
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, name, description, icon_url, banner_url, owner_id, is_public, member_count, max_members, vanity_url, created_at, updated_at
 		FROM guilds
-		WHERE deleted_at IS NULL
 		ORDER BY created_at DESC
 		LIMIT $1 OFFSET $2`, limit, offset,
 	)

@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"github.com/relay-forge/relay-forge/services/media/internal/config"
 )
@@ -48,8 +50,30 @@ func (h *LiveKitHandler) GenerateToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	authenticatedUserID := GetUserID(r.Context())
+	if authenticatedUserID == uuid.Nil {
+		http.Error(w, `{"error":"authentication required"}`, http.StatusUnauthorized)
+		return
+	}
+	if req.Identity != authenticatedUserID.String() {
+		http.Error(w, `{"error":"identity must match the authenticated user"}`, http.StatusForbidden)
+		return
+	}
+	if strings.TrimSpace(req.RoomName) == "" {
+		http.Error(w, `{"error":"room_name is required"}`, http.StatusBadRequest)
+		return
+	}
+
 	expiresAt := time.Now().Add(24 * time.Hour)
-	token, err := buildLiveKitToken(h.cfg.LiveKit.APIKey, h.cfg.LiveKit.APISecret, req.RoomName, req.Identity, req.CanPublish, req.CanSubscribe, expiresAt)
+	token, err := buildLiveKitToken(
+		h.cfg.LiveKit.APIKey,
+		h.cfg.LiveKit.APISecret,
+		req.RoomName,
+		authenticatedUserID.String(),
+		req.CanPublish,
+		req.CanSubscribe,
+		expiresAt,
+	)
 	if err != nil {
 		http.Error(w, `{"error":"failed to generate token"}`, http.StatusInternalServerError)
 		return

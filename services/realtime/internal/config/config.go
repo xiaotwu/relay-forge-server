@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -13,6 +14,7 @@ type Config struct {
 	LogFormat      string
 	JWTSecret      string
 	MaxConnections int
+	AllowedOrigins []string
 	Valkey         ValkeyConfig
 }
 
@@ -35,6 +37,7 @@ func Load() (*Config, error) {
 		LogFormat:      getEnv("RELAY_LOG_FORMAT", "console"),
 		JWTSecret:      getEnv("AUTH_JWT_SECRET", "change-me-in-production"),
 		MaxConnections: getEnvInt("REALTIME_MAX_CONNECTIONS", 10000),
+		AllowedOrigins: splitCSV(getEnv("REALTIME_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5174")),
 		Valkey: ValkeyConfig{
 			Host:     getEnv("VALKEY_HOST", "localhost"),
 			Port:     getEnvInt("VALKEY_PORT", 6379),
@@ -58,4 +61,20 @@ func getEnvInt(key string, fallback int) int {
 		}
 	}
 	return fallback
+}
+
+func splitCSV(s string) []string {
+	if s == "" {
+		return nil
+	}
+
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
 }

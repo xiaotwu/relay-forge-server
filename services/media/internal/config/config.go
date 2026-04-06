@@ -9,12 +9,23 @@ import (
 type Config struct {
 	Host      string
 	Port      int
+	Env       string
 	LogLevel  string
 	LogFormat string
+	CORS      CORSConfig
+	Auth      AuthConfig
 	S3        S3Config
 	LiveKit   LiveKitConfig
 	Upload    UploadConfig
 	Antivirus AntivirusConfig
+}
+
+type CORSConfig struct {
+	Origins []string
+}
+
+type AuthConfig struct {
+	JWTSecret string
 }
 
 type S3Config struct {
@@ -51,8 +62,15 @@ func Load() (*Config, error) {
 	return &Config{
 		Host:      getEnv("MEDIA_HOST", "0.0.0.0"),
 		Port:      getEnvInt("MEDIA_PORT", 8082),
+		Env:       getEnv("RELAY_ENV", "development"),
 		LogLevel:  getEnv("RELAY_LOG_LEVEL", "debug"),
 		LogFormat: getEnv("RELAY_LOG_FORMAT", "console"),
+		CORS: CORSConfig{
+			Origins: splitCSV(getEnv("MEDIA_CORS_ORIGINS", "http://localhost:3000,http://localhost:5174")),
+		},
+		Auth: AuthConfig{
+			JWTSecret: getEnv("AUTH_JWT_SECRET", "change-me-in-production"),
+		},
 		S3: S3Config{
 			Endpoint:      getEnv("S3_ENDPOINT", "http://localhost:9000"),
 			Region:        getEnv("S3_REGION", "us-east-1"),
@@ -71,7 +89,7 @@ func Load() (*Config, error) {
 		},
 		Upload: UploadConfig{
 			MaxFileSize: getEnvInt64("UPLOAD_MAX_FILE_SIZE", 52428800),
-			AllowedMIME: getEnv("UPLOAD_ALLOWED_MIME_TYPES", "image/png,image/jpeg,image/gif"),
+			AllowedMIME: getEnv("UPLOAD_ALLOWED_MIME_TYPES", "image/png,image/jpeg,image/gif,image/webp,image/avif,application/pdf,text/plain,application/zip,application/x-zip-compressed"),
 			ChunkSize:   getEnvInt64("UPLOAD_CHUNK_SIZE", 5242880),
 		},
 		Antivirus: AntivirusConfig{
@@ -123,4 +141,34 @@ func getEnvDuration(key string, fallback time.Duration) time.Duration {
 		}
 	}
 	return fallback
+}
+
+func splitCSV(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var values []string
+	start := 0
+	for index := 0; index <= len(s); index++ {
+		if index == len(s) || s[index] == ',' {
+			part := trimSpace(s[start:index])
+			if part != "" {
+				values = append(values, part)
+			}
+			start = index + 1
+		}
+	}
+	return values
+}
+
+func trimSpace(s string) string {
+	start := 0
+	end := len(s)
+	for start < end && (s[start] == ' ' || s[start] == '\t') {
+		start++
+	}
+	for end > start && (s[end-1] == ' ' || s[end-1] == '\t') {
+		end--
+	}
+	return s[start:end]
 }

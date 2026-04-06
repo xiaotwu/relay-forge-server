@@ -17,14 +17,53 @@ import (
 type ChannelHandler struct {
 	channelRepo *repository.ChannelRepository
 	guildRepo   *repository.GuildRepository
+	roleRepo    *repository.RoleRepository
 }
 
 // NewChannelHandler creates a new ChannelHandler.
-func NewChannelHandler(channelRepo *repository.ChannelRepository, guildRepo *repository.GuildRepository) *ChannelHandler {
+func NewChannelHandler(
+	channelRepo *repository.ChannelRepository,
+	guildRepo *repository.GuildRepository,
+	roleRepo *repository.RoleRepository,
+) *ChannelHandler {
 	return &ChannelHandler{
 		channelRepo: channelRepo,
 		guildRepo:   guildRepo,
+		roleRepo:    roleRepo,
 	}
+}
+
+const guildAdminPermission int64 = 1 << 31
+
+func hasGlobalAdminRole(roles []string) bool {
+	for _, role := range roles {
+		if role == "admin" {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *ChannelHandler) canManageChannel(r *http.Request, guildID, userID uuid.UUID) error {
+	guild, err := h.guildRepo.GetByID(r.Context(), guildID)
+	if err != nil {
+		return err
+	}
+
+	if guild.OwnerID == userID || hasGlobalAdminRole(middleware.GetUserRoles(r.Context())) {
+		return nil
+	}
+
+	permissions, err := h.roleRepo.GetUserPermissions(r.Context(), guildID, userID)
+	if err != nil {
+		return err
+	}
+
+	if permissions&guildAdminPermission != 0 {
+		return nil
+	}
+
+	return apperrors.Forbidden("only guild admins can manage channels")
 }
 
 // -- Request / Response types ------------------------------------------------
@@ -59,14 +98,8 @@ func (h *ChannelHandler) CreateChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify the user is the guild owner.
-	guild, err := h.guildRepo.GetByID(r.Context(), guildID)
-	if err != nil {
+	if err := h.canManageChannel(r, guildID, userID); err != nil {
 		respondError(w, err)
-		return
-	}
-	if guild.OwnerID != userID {
-		respondError(w, apperrors.Forbidden("only the guild owner can create channels"))
 		return
 	}
 
@@ -156,14 +189,8 @@ func (h *ChannelHandler) UpdateChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify the user is the guild owner.
-	guild, err := h.guildRepo.GetByID(r.Context(), guildID)
-	if err != nil {
+	if err := h.canManageChannel(r, guildID, userID); err != nil {
 		respondError(w, err)
-		return
-	}
-	if guild.OwnerID != userID {
-		respondError(w, apperrors.Forbidden("only the guild owner can update channels"))
 		return
 	}
 
@@ -226,14 +253,8 @@ func (h *ChannelHandler) DeleteChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify the user is the guild owner.
-	guild, err := h.guildRepo.GetByID(r.Context(), guildID)
-	if err != nil {
+	if err := h.canManageChannel(r, guildID, userID); err != nil {
 		respondError(w, err)
-		return
-	}
-	if guild.OwnerID != userID {
-		respondError(w, apperrors.Forbidden("only the guild owner can delete channels"))
 		return
 	}
 

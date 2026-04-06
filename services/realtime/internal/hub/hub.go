@@ -3,6 +3,8 @@ package hub
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -73,6 +75,14 @@ type Hub struct {
 type guildMessage struct {
 	guildID uuid.UUID
 	data    []byte
+}
+
+type typingPayload struct {
+	ChannelID string `json:"channelId"`
+	GuildID   string `json:"guildId,omitempty"`
+	UserID    string `json:"userId,omitempty"`
+	Username  string `json:"username,omitempty"`
+	Timestamp string `json:"timestamp,omitempty"`
 }
 
 func New(cfg *config.Config) *Hub {
@@ -174,6 +184,11 @@ func (h *Hub) SendToUser(userID uuid.UUID, event Event) {
 }
 
 func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
+	if origin := r.Header.Get("Origin"); origin != "" && !h.isOriginAllowed(origin) {
+		http.Error(w, "origin not allowed", http.StatusForbidden)
+		return
+	}
+
 	tokenStr := r.URL.Query().Get("token")
 	if tokenStr == "" {
 		http.Error(w, "missing token", http.StatusUnauthorized)
@@ -317,10 +332,14 @@ func (c *Client) writePump() {
 }
 
 func (c *Client) handleEvent(event Event) {
-	switch event.Type {
-	case EventTypingStart, EventTypingStop:
-		if gid, err := uuid.Parse(event.GuildID); err == nil {
-			c.hub.BroadcastToGuild(gid, event)
+	switch normalizeEventType(event.Type) {
+	case EventTypingStart:
+		outbound, ok := buildTypingBroadcast(event)
+		if !ok {
+			return
+		}
+		if gid, err := uuid.Parse(outbound.GuildID); err == nil {
+			c.hub.BroadcastToGuild(gid, outbound)
 		}
 	case EventReadState:
 		// Read state updates are per-user, echoed back
@@ -330,4 +349,94 @@ func (c *Client) handleEvent(event Event) {
 			c.hub.BroadcastToGuild(gid, event)
 		}
 	}
+}
+
+func normalizeEventType(eventType string) string {
+	switch strings.ToUpper(eventType) {
+	case "TYPING_START":
+		return EventTypingStart
+	case "TYPING_STOP":
+		return EventTypingStop
+	case "READ_STATE_UPDATE":
+		return EventReadState
+	case "PRESENCE_UPDATE":
+		return EventPresence
+	default:
+		return eventType
+	}
+}
+
+func buildTypingBroadcast(event Event) (Event, bool) {
+	payload := typingPayload{}
+	if len(event.Data) > 0 {
+		if err := json.Unmarshal(event.Data, &payload); err != nil {
+			return Event{}, false
+		}
+	}
+
+	if payload.ChannelID == "" {
+		payload.ChannelID = event.ChannelID
+	}
+	if payload.GuildID == "" {
+		payload.GuildID = event.GuildID
+	}
+	if payload.UserID == "" {
+		payload.UserID = event.UserID
+	}
+	if payload.Username == "" {
+		payload.Username = "Someone"
+	}
+	if payload.Timestamp == "" {
+		payload.Timestamp = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+
+	if payload.ChannelID == "" || payload.GuildID == "" || payload.UserID == "" {
+		return Event{}, false
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return Event{}, false
+	}
+
+	return Event{
+		Type:      "TYPING_START",
+		ChannelID: payload.ChannelID,
+		GuildID:   payload.GuildID,
+		UserID:    payload.UserID,
+		Data:      data,
+	}, true
+}
+
+func (h *Hub) isOriginAllowed(origin string) bool {
+	if origin == "" {
+		return true
+	}
+
+	if len(h.cfg.AllowedOrigins) == 0 {
+		return false
+	}
+
+	parsedOrigin, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+
+	for _, allowed := range h.cfg.AllowedOrigins {
+		if allowed == "*" {
+			return true
+		}
+
+		parsedAllowed, err := url.Parse(allowed)
+		if err != nil {
+			continue
+		}
+
+		if strings.EqualFold(parsedAllowed.Scheme, parsedOrigin.Scheme) &&
+			strings.EqualFold(parsedAllowed.Host, parsedOrigin.Host) {
+			return true
+		}
+	}
+
+	return false
 }

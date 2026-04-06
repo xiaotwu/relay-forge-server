@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -85,7 +86,8 @@ func (h *MessageHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Content == "" {
+	content := strings.TrimSpace(req.Content)
+	if content == "" {
 		respondError(w, apperrors.Validation("content is required", nil))
 		return
 	}
@@ -112,7 +114,7 @@ func (h *MessageHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		ID:        uuid.New(),
 		ChannelID: channelID,
 		AuthorID:  userID,
-		Content:   &req.Content,
+		Content:   &content,
 		Type:      "default",
 		ReplyToID: req.ReplyToID,
 		CreatedAt: time.Now(),
@@ -152,12 +154,13 @@ func (h *MessageHandler) EditMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Content == "" {
+	content := strings.TrimSpace(req.Content)
+	if content == "" {
 		respondError(w, apperrors.Validation("content is required", nil))
 		return
 	}
 
-	msg.Content = &req.Content
+	msg.Content = &content
 	if err := h.messageRepo.Update(r.Context(), msg); err != nil {
 		respondError(w, err)
 		return
@@ -202,7 +205,7 @@ func (h *MessageHandler) SearchMessages(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	query := r.URL.Query().Get("q")
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
 	if query == "" {
 		respondError(w, apperrors.Validation("q query parameter is required", nil))
 		return

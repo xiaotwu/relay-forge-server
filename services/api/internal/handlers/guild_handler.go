@@ -33,9 +33,17 @@ func NewGuildHandler(guildRepo *repository.GuildRepository, pool *pgxpool.Pool) 
 // -- Request / Response types ------------------------------------------------
 
 type createGuildRequest struct {
-	Name        string  `json:"name"`
-	Description *string `json:"description,omitempty"`
-	IsPublic    bool    `json:"is_public"`
+	Name            string                      `json:"name"`
+	Description     *string                     `json:"description,omitempty"`
+	IconURL         *string                     `json:"icon_url,omitempty"`
+	IsPublic        bool                        `json:"is_public"`
+	InitialChannels []createGuildChannelRequest `json:"initial_channels,omitempty"`
+}
+
+type createGuildChannelRequest struct {
+	Name  string `json:"name"`
+	Type  string `json:"type"`
+	Topic string `json:"topic,omitempty"`
 }
 
 type updateGuildRequest struct {
@@ -91,6 +99,7 @@ func (h *GuildHandler) CreateGuild(w http.ResponseWriter, r *http.Request) {
 		ID:          uuid.New(),
 		Name:        req.Name,
 		Description: req.Description,
+		IconURL:     req.IconURL,
 		OwnerID:     userID,
 		IsPublic:    req.IsPublic,
 		MemberCount: 1,
@@ -110,7 +119,76 @@ func (h *GuildHandler) CreateGuild(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.seedGuildDefaults(r, guild.ID, userID, req.InitialChannels); err != nil {
+		respondError(w, err)
+		return
+	}
+
 	respondJSON(w, http.StatusCreated, guild)
+}
+
+func (h *GuildHandler) seedGuildDefaults(
+	r *http.Request,
+	guildID uuid.UUID,
+	ownerID uuid.UUID,
+	initialChannels []createGuildChannelRequest,
+) error {
+	now := time.Now()
+
+	if _, err := h.pool.Exec(r.Context(), `
+		INSERT INTO roles (id, guild_id, name, color, position, permissions, is_default, is_mentionable, created_at, updated_at)
+		VALUES ($1, $2, 'Everyone', '#64748B', 0, 0, true, false, $3, $3)`,
+		uuid.New(), guildID, now,
+	); err != nil {
+		return apperrors.Internal("failed to create default role")
+	}
+
+	var adminRoleID uuid.UUID
+	err := h.pool.QueryRow(r.Context(), `
+		INSERT INTO roles (id, guild_id, name, color, position, permissions, is_default, is_mentionable, created_at, updated_at)
+		VALUES ($1, $2, 'Admin', '#10B981', 1, $3, false, true, $4, $4)
+		RETURNING id`,
+		uuid.New(), guildID, int64(1<<31), now,
+	).Scan(&adminRoleID)
+	if err != nil {
+		return apperrors.Internal("failed to create admin role")
+	}
+
+	if _, err := h.pool.Exec(r.Context(), `
+		INSERT INTO guild_member_roles (guild_id, user_id, role_id, assigned_at)
+		VALUES ($1, $2, $3, NOW())`,
+		guildID, ownerID, adminRoleID,
+	); err != nil {
+		return apperrors.Internal("failed to assign admin role")
+	}
+
+	if len(initialChannels) == 0 {
+		initialChannels = []createGuildChannelRequest{
+			{Name: "general", Type: "text", Topic: "Welcome to your new server"},
+			{Name: "lounge", Type: "voice", Topic: "Hop in for voice, screenshare, or streaming"},
+		}
+	}
+
+	for index, channel := range initialChannels {
+		if channel.Name == "" {
+			continue
+		}
+
+		var topic *string
+		if channel.Topic != "" {
+			topic = &channel.Topic
+		}
+
+		if _, err := h.pool.Exec(r.Context(), `
+			INSERT INTO channels (id, guild_id, name, type, topic, position, is_nsfw, slowmode_secs, created_at, updated_at)
+			VALUES ($1, $2, $3, $4::channel_type, $5, $6, false, 0, $7, $7)`,
+			uuid.New(), guildID, channel.Name, channel.Type, topic, index, now,
+		); err != nil {
+			return apperrors.Internal("failed to create initial channels")
+		}
+	}
+
+	return nil
 }
 
 // ListGuilds returns the guilds the current user is a member of.

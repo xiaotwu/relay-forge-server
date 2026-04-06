@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -145,6 +146,24 @@ func (r *UserRepository) GetPasswordHash(ctx context.Context, userID uuid.UUID) 
 	return hash, nil
 }
 
+func (r *UserRepository) IsTwoFactorEnabled(ctx context.Context, userID uuid.UUID) (bool, string, error) {
+	var secret string
+	err := r.pool.QueryRow(ctx, `
+		SELECT secret
+		FROM totp_secrets
+		WHERE user_id = $1 AND verified = true`,
+		userID,
+	).Scan(&secret)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, "", nil
+		}
+		return false, "", apperrors.Internal("failed to get two-factor status")
+	}
+
+	return true, secret, nil
+}
+
 func (r *UserRepository) UpdatePassword(ctx context.Context, userID uuid.UUID, hash string) error {
 	result, err := r.pool.Exec(ctx, `
 		UPDATE user_passwords SET password_hash = $2, changed_at = NOW() WHERE user_id = $1`,
@@ -208,4 +227,56 @@ func (r *UserRepository) List(ctx context.Context, limit, offset int) ([]models.
 	}
 
 	return users, total, nil
+}
+
+func (r *UserRepository) SearchPublic(ctx context.Context, query string, limit int, excludeUserID uuid.UUID) ([]models.User, error) {
+	query = strings.TrimSpace(query)
+	if limit <= 0 {
+		limit = 12
+	}
+
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, username, display_name, email, avatar_url, banner_url, bio, status, custom_status, is_bot, is_verified, is_disabled, locale, created_at, updated_at
+		FROM users
+		WHERE is_disabled = false
+		  AND id <> $2
+		  AND (
+		    $1 = ''
+		    OR username ILIKE '%' || $1 || '%'
+		    OR COALESCE(display_name, '') ILIKE '%' || $1 || '%'
+		    OR email ILIKE '%' || $1 || '%'
+		  )
+		ORDER BY
+		  CASE
+		    WHEN username ILIKE $1 || '%' THEN 0
+		    WHEN COALESCE(display_name, '') ILIKE $1 || '%' THEN 1
+		    ELSE 2
+		  END,
+		  COALESCE(display_name, username) ASC
+		LIMIT $3`,
+		query, excludeUserID, limit,
+	)
+	if err != nil {
+		return nil, apperrors.Internal("failed to search users")
+	}
+	defer rows.Close()
+
+	var users []models.User
+	for rows.Next() {
+		var u models.User
+		if err := rows.Scan(
+			&u.ID, &u.Username, &u.DisplayName, &u.Email, &u.AvatarURL, &u.BannerURL, &u.Bio,
+			&u.Status, &u.CustomStatus, &u.IsBot, &u.IsVerified, &u.IsDisabled, &u.Locale,
+			&u.CreatedAt, &u.UpdatedAt,
+		); err != nil {
+			return nil, apperrors.Internal("failed to scan searched user")
+		}
+		users = append(users, u)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, apperrors.Internal("failed to iterate searched users")
+	}
+
+	return users, nil
 }

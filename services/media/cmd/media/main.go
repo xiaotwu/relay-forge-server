@@ -1,15 +1,19 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/cors"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
@@ -24,6 +28,8 @@ var (
 )
 
 func main() {
+	loadDotEnv()
+
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
@@ -39,6 +45,14 @@ func main() {
 	}
 
 	r := chi.NewRouter()
+	r.Use(cors.Handler(cors.Options{
+		AllowedOrigins:   cfg.CORS.Origins,
+		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Request-ID"},
+		ExposedHeaders:   []string{"X-Request-ID"},
+		AllowCredentials: true,
+		MaxAge:           300,
+	}))
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -52,12 +66,13 @@ func main() {
 	livekitHandler := handlers.NewLiveKitHandler(cfg)
 
 	r.Route("/api/v1/media", func(r chi.Router) {
-		r.Post("/upload/presign", uploadHandler.CreatePresignedUpload)
-		r.Post("/upload/complete", uploadHandler.CompleteUpload)
+		r.With(handlers.AuthRequired(cfg.Auth.JWTSecret)).Post("/upload/presign", uploadHandler.CreatePresignedUpload)
+		r.With(handlers.AuthRequired(cfg.Auth.JWTSecret)).Post("/upload/complete", uploadHandler.CompleteUpload)
 		r.Get("/files/{fileID}", uploadHandler.GetFile)
 	})
 
 	r.Route("/api/v1/voice", func(r chi.Router) {
+		r.Use(handlers.AuthRequired(cfg.Auth.JWTSecret))
 		r.Post("/token", livekitHandler.GenerateToken)
 		r.Post("/rooms", livekitHandler.CreateRoom)
 		r.Delete("/rooms/{roomName}", livekitHandler.DeleteRoom)
@@ -99,5 +114,64 @@ func setupLogger(level, format string) {
 	zerolog.SetGlobalLevel(lvl)
 	if format == "text" || format == "console" {
 		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339})
+	}
+}
+
+func loadDotEnv() {
+	path, ok := findDotEnv()
+	if !ok {
+		return
+	}
+
+	file, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer func() {
+		if err := file.Close(); err != nil {
+			log.Debug().Err(err).Str("path", path).Msg("failed to close dotenv file")
+		}
+	}()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		key, value, found := strings.Cut(line, "=")
+		if !found {
+			continue
+		}
+
+		key = strings.TrimSpace(key)
+		if key == "" || os.Getenv(key) != "" {
+			continue
+		}
+
+		value = strings.TrimSpace(value)
+		value = strings.Trim(value, `"'`)
+		_ = os.Setenv(key, value)
+	}
+}
+
+func findDotEnv() (string, bool) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", false
+	}
+
+	for {
+		candidate := filepath.Join(dir, ".env")
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate, true
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+		dir = parent
 	}
 }

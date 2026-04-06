@@ -127,7 +127,11 @@ func loadDotEnv() {
 	if err != nil {
 		return
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			log.Debug().Err(err).Str("path", path).Msg("failed to close dotenv file")
+		}
+	}()
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {

@@ -8,8 +8,8 @@ import (
 )
 
 type status struct {
-	Status   string            `json:"status"`
-	Checks   map[string]string `json:"checks,omitempty"`
+	Status string            `json:"status"`
+	Checks map[string]string `json:"checks,omitempty"`
 }
 
 func Healthz(db *pgxpool.Pool) http.HandlerFunc {

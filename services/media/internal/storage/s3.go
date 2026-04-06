@@ -86,7 +86,26 @@ func (s *S3Store) PresignedGetURL(ctx context.Context, bucket, key string, expir
 	return u.String(), nil
 }
 
-func (s *S3Store) BucketUploads() string { return s.bucketUploads }
-func (s *S3Store) BucketAvatars() string { return s.bucketAvatars }
-func (s *S3Store) BucketEmoji() string   { return s.bucketEmoji }
+func (s *S3Store) FindUploadKey(ctx context.Context, fileID string) (string, error) {
+	prefix := "uploads/" + fileID
+	objects := s.client.ListObjects(ctx, s.bucketUploads, minio.ListObjectsOptions{
+		Prefix:    prefix,
+		Recursive: true,
+		MaxKeys:   1,
+	})
+
+	objectInfo, ok := <-objects
+	if !ok {
+		return "", fmt.Errorf("upload not found")
+	}
+	if objectInfo.Err != nil {
+		return "", objectInfo.Err
+	}
+
+	return objectInfo.Key, nil
+}
+
+func (s *S3Store) BucketUploads() string        { return s.bucketUploads }
+func (s *S3Store) BucketAvatars() string        { return s.bucketAvatars }
+func (s *S3Store) BucketEmoji() string          { return s.bucketEmoji }
 func (s *S3Store) PresignExpiry() time.Duration { return s.presignExpiry }

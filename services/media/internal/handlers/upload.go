@@ -40,6 +40,11 @@ func (h *UploadHandler) CreatePresignedUpload(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	if strings.TrimSpace(req.FileName) == "" || strings.TrimSpace(req.ContentType) == "" || req.FileSize <= 0 {
+		http.Error(w, `{"error":"file_name, content_type, and file_size are required"}`, http.StatusBadRequest)
+		return
+	}
+
 	if req.FileSize > h.cfg.Upload.MaxFileSize {
 		http.Error(w, `{"error":"file too large"}`, http.StatusRequestEntityTooLarge)
 		return
@@ -51,11 +56,7 @@ func (h *UploadHandler) CreatePresignedUpload(w http.ResponseWriter, r *http.Req
 	}
 
 	fileID := uuid.New().String()
-	ext := ""
-	if idx := strings.LastIndex(req.FileName, "."); idx >= 0 {
-		ext = req.FileName[idx:]
-	}
-	key := "uploads/" + fileID + ext
+	key := "uploads/" + fileID
 
 	url, err := h.store.PresignedPutURL(r.Context(), h.store.BucketUploads(), key, h.store.PresignExpiry())
 	if err != nil {
@@ -87,16 +88,28 @@ func (h *UploadHandler) CompleteUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if strings.TrimSpace(req.FileID) == "" || strings.TrimSpace(req.Key) == "" {
+		http.Error(w, `{"error":"file_id and key are required"}`, http.StatusBadRequest)
+		return
+	}
+
 	downloadURL, err := h.store.PresignedGetURL(r.Context(), h.store.BucketUploads(), req.Key, h.store.PresignExpiry())
 	if err != nil {
 		http.Error(w, `{"error":"failed to generate download URL"}`, http.StatusInternalServerError)
 		return
 	}
 
-	if err := writeJSON(w, http.StatusOK, map[string]string{
-		"file_id": req.FileID,
-		"url":     downloadURL,
-		"status":  "completed",
+	proxyURL := "/api/v1/media/files/" + req.FileID
+
+	if err := writeJSON(w, http.StatusOK, map[string]any{
+		"id":           req.FileID,
+		"file_id":      req.FileID,
+		"url":          downloadURL,
+		"proxy_url":    proxyURL,
+		"filename":     req.FileName,
+		"content_type": req.ContentType,
+		"size":         req.FileSize,
+		"status":       "completed",
 	}); err != nil {
 		http.Error(w, `{"error":"failed to write response"}`, http.StatusInternalServerError)
 	}
@@ -104,8 +117,16 @@ func (h *UploadHandler) CompleteUpload(w http.ResponseWriter, r *http.Request) {
 
 func (h *UploadHandler) GetFile(w http.ResponseWriter, r *http.Request) {
 	fileID := chi.URLParam(r, "fileID")
+	if strings.TrimSpace(fileID) == "" {
+		http.Error(w, `{"error":"file not found"}`, http.StatusNotFound)
+		return
+	}
 
-	key := "uploads/" + fileID
+	key, err := h.store.FindUploadKey(r.Context(), fileID)
+	if err != nil {
+		http.Error(w, `{"error":"file not found"}`, http.StatusNotFound)
+		return
+	}
 	downloadURL, err := h.store.PresignedGetURL(r.Context(), h.store.BucketUploads(), key, h.store.PresignExpiry())
 	if err != nil {
 		http.Error(w, `{"error":"file not found"}`, http.StatusNotFound)

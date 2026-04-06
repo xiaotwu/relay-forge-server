@@ -11,21 +11,21 @@ import (
 // ============================================================================
 
 type User struct {
-	ID           uuid.UUID  `json:"id"`
-	Username     string     `json:"username"`
-	DisplayName  *string    `json:"display_name,omitempty"`
-	Email        string     `json:"email"`
-	AvatarURL    *string    `json:"avatar_url,omitempty"`
-	BannerURL    *string    `json:"banner_url,omitempty"`
-	Bio          *string    `json:"bio,omitempty"`
-	Status       string     `json:"status"`
-	CustomStatus *string    `json:"custom_status,omitempty"`
-	IsBot        bool       `json:"is_bot"`
-	IsVerified   bool       `json:"is_verified"`
-	IsDisabled   bool       `json:"is_disabled"`
-	Locale       string     `json:"locale"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	ID           uuid.UUID `json:"id"`
+	Username     string    `json:"username"`
+	DisplayName  *string   `json:"display_name,omitempty"`
+	Email        string    `json:"email"`
+	AvatarURL    *string   `json:"avatar_url,omitempty"`
+	BannerURL    *string   `json:"banner_url,omitempty"`
+	Bio          *string   `json:"bio,omitempty"`
+	Status       string    `json:"status"`
+	CustomStatus *string   `json:"custom_status,omitempty"`
+	IsBot        bool      `json:"is_bot"`
+	IsVerified   bool      `json:"is_verified"`
+	IsDisabled   bool      `json:"is_disabled"`
+	Locale       string    `json:"locale"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type UserPassword struct {
@@ -35,25 +35,25 @@ type UserPassword struct {
 }
 
 type Session struct {
-	ID           uuid.UUID  `json:"id"`
-	UserID       uuid.UUID  `json:"user_id"`
-	TokenHash    string     `json:"-"`
-	IPAddress    *string    `json:"ip_address,omitempty"`
-	UserAgent    *string    `json:"user_agent,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	ExpiresAt    time.Time  `json:"expires_at"`
-	LastActiveAt time.Time  `json:"last_active_at"`
+	ID           uuid.UUID `json:"id"`
+	UserID       uuid.UUID `json:"user_id"`
+	TokenHash    string    `json:"-"`
+	IPAddress    *string   `json:"ip_address,omitempty"`
+	UserAgent    *string   `json:"user_agent,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+	ExpiresAt    time.Time `json:"expires_at"`
+	LastActiveAt time.Time `json:"last_active_at"`
 }
 
 type RefreshToken struct {
-	ID         uuid.UUID  `json:"id"`
-	UserID     uuid.UUID  `json:"user_id"`
-	TokenHash  string     `json:"-"`
-	DeviceID   *uuid.UUID `json:"device_id,omitempty"`
-	IPAddress  *string    `json:"ip_address,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
-	ExpiresAt  time.Time  `json:"expires_at"`
-	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
+	ID        uuid.UUID  `json:"id"`
+	UserID    uuid.UUID  `json:"user_id"`
+	TokenHash string     `json:"-"`
+	DeviceID  *uuid.UUID `json:"device_id,omitempty"`
+	IPAddress *string    `json:"ip_address,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	ExpiresAt time.Time  `json:"expires_at"`
+	RevokedAt *time.Time `json:"revoked_at,omitempty"`
 }
 
 type Device struct {
@@ -99,18 +99,18 @@ type EmailVerification struct {
 // ============================================================================
 
 type Guild struct {
-	ID          uuid.UUID  `json:"id"`
-	Name        string     `json:"name"`
-	Description *string    `json:"description,omitempty"`
-	IconURL     *string    `json:"icon_url,omitempty"`
-	BannerURL   *string    `json:"banner_url,omitempty"`
-	OwnerID     uuid.UUID  `json:"owner_id"`
-	IsPublic    bool       `json:"is_public"`
-	MemberCount int        `json:"member_count"`
-	MaxMembers  int        `json:"max_members"`
-	VanityURL   *string    `json:"vanity_url,omitempty"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
+	ID          uuid.UUID `json:"id"`
+	Name        string    `json:"name"`
+	Description *string   `json:"description,omitempty"`
+	IconURL     *string   `json:"icon_url,omitempty"`
+	BannerURL   *string   `json:"banner_url,omitempty"`
+	OwnerID     uuid.UUID `json:"owner_id"`
+	IsPublic    bool      `json:"is_public"`
+	MemberCount int       `json:"member_count"`
+	MaxMembers  int       `json:"max_members"`
+	VanityURL   *string   `json:"vanity_url,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type GuildMember struct {
@@ -228,11 +228,11 @@ type MessageMention struct {
 }
 
 type ReadState struct {
-	ChannelID    uuid.UUID  `json:"channel_id"`
-	UserID       uuid.UUID  `json:"user_id"`
+	ChannelID     uuid.UUID  `json:"channel_id"`
+	UserID        uuid.UUID  `json:"user_id"`
 	LastMessageID *uuid.UUID `json:"last_message_id,omitempty"`
-	MentionCount int        `json:"mention_count"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	MentionCount  int        `json:"mention_count"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 type Pin struct {
@@ -480,20 +480,20 @@ type WordFilter struct {
 // ============================================================================
 
 type FileUpload struct {
-	ID             uuid.UUID  `json:"id"`
-	UploaderID     uuid.UUID  `json:"uploader_id"`
-	FileName       string     `json:"file_name"`
-	FileSize       int64      `json:"file_size"`
-	ContentType    string     `json:"content_type"`
-	StorageKey     string     `json:"storage_key"`
-	Bucket         string     `json:"bucket"`
-	URL            string     `json:"url"`
-	Status         string     `json:"status"`
-	ChecksumSHA256 *string    `json:"checksum_sha256,omitempty"`
-	Width          *int       `json:"width,omitempty"`
-	Height         *int       `json:"height,omitempty"`
-	DurationSecs   *float64   `json:"duration_secs,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
+	ID             uuid.UUID `json:"id"`
+	UploaderID     uuid.UUID `json:"uploader_id"`
+	FileName       string    `json:"file_name"`
+	FileSize       int64     `json:"file_size"`
+	ContentType    string    `json:"content_type"`
+	StorageKey     string    `json:"storage_key"`
+	Bucket         string    `json:"bucket"`
+	URL            string    `json:"url"`
+	Status         string    `json:"status"`
+	ChecksumSHA256 *string   `json:"checksum_sha256,omitempty"`
+	Width          *int      `json:"width,omitempty"`
+	Height         *int      `json:"height,omitempty"`
+	DurationSecs   *float64  `json:"duration_secs,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 // ============================================================================

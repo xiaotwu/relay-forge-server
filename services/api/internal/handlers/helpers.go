@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -12,9 +14,9 @@ import (
 
 // apiResponse wraps all JSON responses with a consistent structure.
 type apiResponse struct {
-	Data  any    `json:"data,omitempty"`
-	Error any    `json:"error,omitempty"`
-	Meta  any    `json:"meta,omitempty"`
+	Data  any `json:"data,omitempty"`
+	Error any `json:"error,omitempty"`
+	Meta  any `json:"meta,omitempty"`
 }
 
 // respondJSON writes a JSON response with the given status code and data.
@@ -104,4 +106,30 @@ func parseCursor(r *http.Request) *uuid.UUID {
 // forbiddenErr creates a Forbidden AppError with the given message.
 func forbiddenErr(msg string) error {
 	return apperrors.Forbidden(msg)
+}
+
+// extractClientIP returns the best-effort client IP address for storage in INET columns.
+func extractClientIP(r *http.Request) *string {
+	forwarded := r.Header.Get("X-Forwarded-For")
+	if forwarded != "" {
+		for _, part := range strings.Split(forwarded, ",") {
+			candidate := strings.TrimSpace(part)
+			if ip := net.ParseIP(candidate); ip != nil {
+				normalized := ip.String()
+				return &normalized
+			}
+		}
+	}
+
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err != nil {
+		host = strings.TrimSpace(r.RemoteAddr)
+	}
+
+	if ip := net.ParseIP(host); ip != nil {
+		normalized := ip.String()
+		return &normalized
+	}
+
+	return nil
 }

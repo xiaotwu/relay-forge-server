@@ -105,3 +105,40 @@ func TestParseCursor(t *testing.T) {
 		}
 	})
 }
+
+func TestExtractClientIP(t *testing.T) {
+	t.Run("extracts host from remote addr", func(t *testing.T) {
+		req := &http.Request{RemoteAddr: "127.0.0.1:54321", Header: make(http.Header)}
+		ip := extractClientIP(req)
+		if ip == nil {
+			t.Fatal("expected IP to be extracted")
+		}
+		if *ip != "127.0.0.1" {
+			t.Fatalf("expected 127.0.0.1, got %s", *ip)
+		}
+	})
+
+	t.Run("prefers first valid forwarded IP", func(t *testing.T) {
+		req := &http.Request{
+			RemoteAddr: "127.0.0.1:54321",
+			Header: http.Header{
+				"X-Forwarded-For": []string{"bad-value, 203.0.113.5, 198.51.100.2"},
+			},
+		}
+		ip := extractClientIP(req)
+		if ip == nil {
+			t.Fatal("expected forwarded IP to be extracted")
+		}
+		if *ip != "203.0.113.5" {
+			t.Fatalf("expected 203.0.113.5, got %s", *ip)
+		}
+	})
+
+	t.Run("returns nil for invalid input", func(t *testing.T) {
+		req := &http.Request{RemoteAddr: "not-an-ip", Header: make(http.Header)}
+		ip := extractClientIP(req)
+		if ip != nil {
+			t.Fatalf("expected nil IP, got %s", *ip)
+		}
+	})
+}

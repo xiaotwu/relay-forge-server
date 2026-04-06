@@ -46,15 +46,17 @@ func NewRouter(cfg *config.Config, db *pgxpool.Pool) http.Handler {
 	channelRepo := repository.NewChannelRepository(db)
 	messageRepo := repository.NewMessageRepository(db)
 	roleRepo := repository.NewRoleRepository(db)
+	dmRepo := repository.NewDMRepository(db)
 
 	// Handlers
-	authHandler := NewAuthHandler(userRepo, sessionRepo, jwtSvc, cfg)
+	authHandler := NewAuthHandler(userRepo, sessionRepo, jwtSvc, cfg, db)
 	userHandler := NewUserHandler(userRepo, sessionRepo, jwtSvc, cfg, db)
 	guildHandler := NewGuildHandler(guildRepo, db)
-	channelHandler := NewChannelHandler(channelRepo, guildRepo)
+	channelHandler := NewChannelHandler(channelRepo, guildRepo, roleRepo)
 	messageHandler := NewMessageHandler(messageRepo, channelRepo, guildRepo)
 	roleHandler := NewRoleHandler(roleRepo, guildRepo)
 	adminHandler := NewAdminHandler(userRepo, guildRepo)
+	dmHandler := NewDMHandler(dmRepo, userRepo)
 
 	// Health checks
 	r.Get("/healthz", health.Healthz(db))
@@ -68,8 +70,8 @@ func NewRouter(cfg *config.Config, db *pgxpool.Pool) http.Handler {
 			r.Post("/login", authHandler.Login)
 			r.Post("/refresh", authHandler.Refresh)
 			r.With(middleware.AuthRequired(jwtSvc)).Post("/logout", authHandler.Logout)
-				r.Post("/password-reset/request", authHandler.PasswordResetRequest)
-				r.Post("/password-reset/confirm", authHandler.PasswordResetConfirm)
+			r.Post("/password-reset/request", authHandler.PasswordResetRequest)
+			r.Post("/password-reset/confirm", authHandler.PasswordResetConfirm)
 		})
 
 		// Authenticated routes
@@ -78,7 +80,9 @@ func NewRouter(cfg *config.Config, db *pgxpool.Pool) http.Handler {
 
 			// User routes
 			r.Route("/users", func(r chi.Router) {
+				r.Get("/", userHandler.SearchUsers)
 				r.Get("/me", userHandler.GetMe)
+				r.Get("/{userID}", userHandler.GetPublicProfile)
 				r.Patch("/me", userHandler.UpdateMe)
 				r.Get("/me/sessions", userHandler.ListSessions)
 				r.Delete("/me/sessions/{sessionID}", userHandler.RevokeSession)
@@ -89,11 +93,11 @@ func NewRouter(cfg *config.Config, db *pgxpool.Pool) http.Handler {
 
 			// Guild routes
 			r.Route("/guilds", func(r chi.Router) {
-					r.Post("/", guildHandler.CreateGuild)
-					r.Get("/", guildHandler.ListGuilds)
-					r.Get("/{guildID}", guildHandler.GetGuild)
-					r.Patch("/{guildID}", guildHandler.UpdateGuild)
-					r.Delete("/{guildID}", guildHandler.DeleteGuild)
+				r.Post("/", guildHandler.CreateGuild)
+				r.Get("/", guildHandler.ListGuilds)
+				r.Get("/{guildID}", guildHandler.GetGuild)
+				r.Patch("/{guildID}", guildHandler.UpdateGuild)
+				r.Delete("/{guildID}", guildHandler.DeleteGuild)
 				r.Get("/{guildID}/members", guildHandler.ListMembers)
 				r.Post("/{guildID}/members", guildHandler.JoinGuild)
 				r.Delete("/{guildID}/members/{userID}", guildHandler.KickMember)
@@ -102,11 +106,11 @@ func NewRouter(cfg *config.Config, db *pgxpool.Pool) http.Handler {
 
 				// Channel routes (nested under guild)
 				r.Route("/{guildID}/channels", func(r chi.Router) {
-						r.Post("/", channelHandler.CreateChannel)
-						r.Get("/", channelHandler.ListChannels)
-						r.Get("/{channelID}", channelHandler.GetChannel)
-						r.Patch("/{channelID}", channelHandler.UpdateChannel)
-						r.Delete("/{channelID}", channelHandler.DeleteChannel)
+					r.Post("/", channelHandler.CreateChannel)
+					r.Get("/", channelHandler.ListChannels)
+					r.Get("/{channelID}", channelHandler.GetChannel)
+					r.Patch("/{channelID}", channelHandler.UpdateChannel)
+					r.Delete("/{channelID}", channelHandler.DeleteChannel)
 				})
 
 				// Role routes (nested under guild)
@@ -122,17 +126,29 @@ func NewRouter(cfg *config.Config, db *pgxpool.Pool) http.Handler {
 
 			// Message routes
 			r.Route("/channels/{channelID}/messages", func(r chi.Router) {
-					r.Get("/", messageHandler.ListMessages)
-					r.Post("/", messageHandler.SendMessage)
-					r.Get("/search", messageHandler.SearchMessages)
-					r.Get("/pins", messageHandler.ListPins)
-					r.Patch("/{messageID}", messageHandler.EditMessage)
-					r.Delete("/{messageID}", messageHandler.DeleteMessage)
-					r.Post("/{messageID}/pin", messageHandler.PinMessage)
-					r.Delete("/{messageID}/pin", messageHandler.UnpinMessage)
-					r.Post("/{messageID}/reactions", messageHandler.AddReaction)
-					r.Delete("/{messageID}/reactions/{emoji}", messageHandler.RemoveReaction)
+				r.Get("/", messageHandler.ListMessages)
+				r.Post("/", messageHandler.SendMessage)
+				r.Get("/search", messageHandler.SearchMessages)
+				r.Get("/pins", messageHandler.ListPins)
+				r.Patch("/{messageID}", messageHandler.EditMessage)
+				r.Delete("/{messageID}", messageHandler.DeleteMessage)
+				r.Post("/{messageID}/pin", messageHandler.PinMessage)
+				r.Delete("/{messageID}/pin", messageHandler.UnpinMessage)
+				r.Post("/{messageID}/reactions", messageHandler.AddReaction)
+				r.Delete("/{messageID}/reactions/{emoji}", messageHandler.RemoveReaction)
+			})
+
+			// Direct message routes
+			r.Route("/dms", func(r chi.Router) {
+				r.Get("/", dmHandler.ListChannels)
+				r.Post("/", dmHandler.CreateChannel)
+				r.Patch("/{dmChannelID}", dmHandler.UpdateChannel)
+				r.Route("/{dmChannelID}/messages", func(r chi.Router) {
+					r.Get("/", dmHandler.ListMessages)
+					r.Post("/", dmHandler.SendMessage)
+					r.Delete("/{messageID}", dmHandler.DeleteMessage)
 				})
+			})
 
 			// Admin routes
 			r.Route("/admin", func(r chi.Router) {

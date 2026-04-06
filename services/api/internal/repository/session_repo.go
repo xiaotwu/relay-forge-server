@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -36,7 +37,7 @@ func (r *SessionRepository) Create(ctx context.Context, session *models.Session)
 func (r *SessionRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.Session, error) {
 	var s models.Session
 	err := r.pool.QueryRow(ctx, `
-		SELECT id, user_id, token_hash, ip_address, user_agent, created_at, expires_at, last_active_at
+		SELECT id, user_id, token_hash, ip_address::text, user_agent, created_at, expires_at, last_active_at
 		FROM sessions
 		WHERE id = $1`, id,
 	).Scan(
@@ -54,7 +55,7 @@ func (r *SessionRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.
 
 func (r *SessionRepository) ListByUser(ctx context.Context, userID uuid.UUID) ([]models.Session, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, user_id, token_hash, ip_address, user_agent, created_at, expires_at, last_active_at
+		SELECT id, user_id, token_hash, ip_address::text, user_agent, created_at, expires_at, last_active_at
 		FROM sessions
 		WHERE user_id = $1
 		ORDER BY last_active_at DESC`, userID,
@@ -101,6 +102,27 @@ func (r *SessionRepository) DeleteAllForUser(ctx context.Context, userID uuid.UU
 	return nil
 }
 
+func (r *SessionRepository) UpdateSessionTokenHash(
+	ctx context.Context,
+	sessionID uuid.UUID,
+	tokenHash string,
+	lastActiveAt time.Time,
+) error {
+	result, err := r.pool.Exec(ctx, `
+		UPDATE sessions
+		SET token_hash = $2, last_active_at = $3
+		WHERE id = $1`,
+		sessionID, tokenHash, lastActiveAt,
+	)
+	if err != nil {
+		return apperrors.Internal("failed to update session")
+	}
+	if result.RowsAffected() == 0 {
+		return apperrors.NotFound("session not found")
+	}
+	return nil
+}
+
 func (r *SessionRepository) CreateRefreshToken(ctx context.Context, rt *models.RefreshToken) error {
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO refresh_tokens (id, user_id, token_hash, device_id, ip_address, created_at, expires_at, revoked_at)
@@ -143,6 +165,30 @@ func (r *SessionRepository) RevokeRefreshToken(ctx context.Context, id uuid.UUID
 	}
 	if result.RowsAffected() == 0 {
 		return apperrors.NotFound("refresh token not found or already revoked")
+	}
+	return nil
+}
+
+func (r *SessionRepository) RevokeRefreshTokenByHash(ctx context.Context, hash string) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE refresh_tokens SET revoked_at = NOW()
+		WHERE token_hash = $1 AND revoked_at IS NULL`,
+		hash,
+	)
+	if err != nil {
+		return apperrors.Internal("failed to revoke refresh token")
+	}
+	return nil
+}
+
+func (r *SessionRepository) RevokeAllRefreshTokensForUser(ctx context.Context, userID uuid.UUID) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE refresh_tokens SET revoked_at = NOW()
+		WHERE user_id = $1 AND revoked_at IS NULL`,
+		userID,
+	)
+	if err != nil {
+		return apperrors.Internal("failed to revoke refresh tokens for user")
 	}
 	return nil
 }

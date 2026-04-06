@@ -68,6 +68,8 @@ type AuthConfig struct {
 	PasswordMinLen    int
 	MaxDevicesPerUser int
 	TOTPIssuer        string
+	AdminEmails       []string
+	AdminUsernames    []string
 }
 
 type SMTPConfig struct {
@@ -165,6 +167,8 @@ func Load() (*Config, error) {
 			PasswordMinLen:    getEnvInt("AUTH_PASSWORD_MIN_LENGTH", 8),
 			MaxDevicesPerUser: getEnvInt("AUTH_MAX_DEVICES_PER_USER", 10),
 			TOTPIssuer:        getEnv("AUTH_TOTP_ISSUER", "RelayForge"),
+			AdminEmails:       splitCSV(getEnv("AUTH_ADMIN_EMAILS", "admin@relayforge.local")),
+			AdminUsernames:    splitCSV(getEnv("AUTH_ADMIN_USERNAMES", "admin")),
 		},
 		SMTP: SMTPConfig{
 			Host:     getEnv("SMTP_HOST", "localhost"),

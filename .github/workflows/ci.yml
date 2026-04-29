@@ -54,24 +54,28 @@ jobs:
         with:
           version: latest
           working-directory: services/api
+          args: ./...
 
       - name: golangci-lint realtime
         uses: golangci/golangci-lint-action@v9
         with:
           version: latest
           working-directory: services/realtime
+          args: ./...
 
       - name: golangci-lint media
         uses: golangci/golangci-lint-action@v9
         with:
           version: latest
           working-directory: services/media
+          args: ./...
 
       - name: golangci-lint worker
         uses: golangci/golangci-lint-action@v9
         with:
           version: latest
           working-directory: services/worker
+          args: ./...
 
       - name: Test API service
         run: cd services/api && go test -race -cover -coverprofile=coverage.out ./...

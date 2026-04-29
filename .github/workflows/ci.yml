@@ -49,33 +49,11 @@ jobs:
             services/media/go.sum
             services/worker/go.sum
 
-      - name: golangci-lint api
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: latest
-          working-directory: services/api
-          args: ./...
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4
 
-      - name: golangci-lint realtime
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: latest
-          working-directory: services/realtime
-          args: ./...
-
-      - name: golangci-lint media
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: latest
-          working-directory: services/media
-          args: ./...
-
-      - name: golangci-lint worker
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: latest
-          working-directory: services/worker
-          args: ./...
+      - name: Run Go lint
+        run: make lint
 
       - name: Test API service
         run: cd services/api && go test -race -cover -coverprofile=coverage.out ./...

@@ -12,6 +12,7 @@ import (
 	"github.com/relay-forge/relay-forge/services/api/internal/config"
 	"github.com/relay-forge/relay-forge/services/api/internal/health"
 	"github.com/relay-forge/relay-forge/services/api/internal/middleware"
+	apirealtime "github.com/relay-forge/relay-forge/services/api/internal/realtime"
 	"github.com/relay-forge/relay-forge/services/api/internal/repository"
 )
 
@@ -38,6 +39,7 @@ func NewRouter(cfg *config.Config, db *pgxpool.Pool) http.Handler {
 
 	// Services
 	jwtSvc := auth.NewJWTService(cfg.Auth.JWTSecret, cfg.Auth.AccessTTL, cfg.Auth.RefreshTTL)
+	authValidator := middleware.UserEnabledValidator(db)
 
 	// Repositories
 	userRepo := repository.NewUserRepository(db)
@@ -47,16 +49,17 @@ func NewRouter(cfg *config.Config, db *pgxpool.Pool) http.Handler {
 	messageRepo := repository.NewMessageRepository(db)
 	roleRepo := repository.NewRoleRepository(db)
 	dmRepo := repository.NewDMRepository(db)
+	realtimePublisher := apirealtime.NewPublisher(cfg.Valkey)
 
 	// Handlers
 	authHandler := NewAuthHandler(userRepo, sessionRepo, jwtSvc, cfg, db)
 	userHandler := NewUserHandler(userRepo, sessionRepo, jwtSvc, cfg, db)
 	guildHandler := NewGuildHandler(guildRepo, db)
 	channelHandler := NewChannelHandler(channelRepo, guildRepo, roleRepo)
-	messageHandler := NewMessageHandler(messageRepo, channelRepo, guildRepo)
+	messageHandler := NewMessageHandler(messageRepo, channelRepo, guildRepo, realtimePublisher)
 	roleHandler := NewRoleHandler(roleRepo, guildRepo)
-	adminHandler := NewAdminHandler(userRepo, guildRepo)
-	dmHandler := NewDMHandler(dmRepo, userRepo)
+	adminHandler := NewAdminHandler(userRepo, guildRepo, sessionRepo, db)
+	dmHandler := NewDMHandler(dmRepo, userRepo, realtimePublisher)
 
 	// Health checks
 	r.Get("/healthz", health.Healthz(db))
@@ -69,14 +72,14 @@ func NewRouter(cfg *config.Config, db *pgxpool.Pool) http.Handler {
 			r.Post("/register", authHandler.Register)
 			r.Post("/login", authHandler.Login)
 			r.Post("/refresh", authHandler.Refresh)
-			r.With(middleware.AuthRequired(jwtSvc)).Post("/logout", authHandler.Logout)
+			r.With(middleware.AuthRequired(jwtSvc, authValidator)).Post("/logout", authHandler.Logout)
 			r.Post("/password-reset/request", authHandler.PasswordResetRequest)
 			r.Post("/password-reset/confirm", authHandler.PasswordResetConfirm)
 		})
 
 		// Authenticated routes
 		r.Group(func(r chi.Router) {
-			r.Use(middleware.AuthRequired(jwtSvc))
+			r.Use(middleware.AuthRequired(jwtSvc, authValidator))
 
 			// User routes
 			r.Route("/users", func(r chi.Router) {
@@ -135,6 +138,7 @@ func NewRouter(cfg *config.Config, db *pgxpool.Pool) http.Handler {
 				r.Post("/{messageID}/pin", messageHandler.PinMessage)
 				r.Delete("/{messageID}/pin", messageHandler.UnpinMessage)
 				r.Post("/{messageID}/reactions", messageHandler.AddReaction)
+				r.Put("/{messageID}/reactions/{emoji}", messageHandler.AddReactionByEmoji)
 				r.Delete("/{messageID}/reactions/{emoji}", messageHandler.RemoveReaction)
 			})
 
@@ -153,8 +157,18 @@ func NewRouter(cfg *config.Config, db *pgxpool.Pool) http.Handler {
 			// Admin routes
 			r.Route("/admin", func(r chi.Router) {
 				r.Use(AdminOnly)
+				r.Get("/dashboard/stats", adminHandler.DashboardStats)
+				r.Get("/dashboard/activity", adminHandler.RecentActivity)
 				r.Get("/users", adminHandler.ListUsers)
+				r.Post("/users/{userID}/disable", adminHandler.DisableUser)
+				r.Post("/users/{userID}/enable", adminHandler.EnableUser)
 				r.Get("/guilds", adminHandler.ListGuilds)
+				r.Get("/audit", adminHandler.ListAuditLogs)
+				r.Get("/reports", adminHandler.ListReports)
+				r.Post("/reports/{reportID}/resolve", adminHandler.ResolveReport)
+				r.Post("/reports/{reportID}/dismiss", adminHandler.DismissReport)
+				r.Get("/settings", adminHandler.GetSettings)
+				r.Post("/settings", adminHandler.UpdateSettings)
 				r.Delete("/users/{userID}", adminHandler.DisableUser)
 				r.Delete("/guilds/{guildID}", adminHandler.DeleteGuild)
 			})

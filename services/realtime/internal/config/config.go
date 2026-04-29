@@ -5,9 +5,11 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Config struct {
+	Env            string
 	Host           string
 	Port           int
 	LogLevel       string
@@ -16,6 +18,7 @@ type Config struct {
 	MaxConnections int
 	AllowedOrigins []string
 	Valkey         ValkeyConfig
+	Database       DatabaseConfig
 }
 
 type ValkeyConfig struct {
@@ -29,8 +32,26 @@ func (c ValkeyConfig) Addr() string {
 	return fmt.Sprintf("%s:%d", c.Host, c.Port)
 }
 
+type DatabaseConfig struct {
+	Host            string
+	Port            int
+	User            string
+	Password        string
+	Name            string
+	SSLMode         string
+	MaxOpenConns    int
+	MaxIdleConns    int
+	ConnMaxLifetime time.Duration
+}
+
+func (c DatabaseConfig) DSN() string {
+	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
+		c.User, c.Password, c.Host, c.Port, c.Name, c.SSLMode)
+}
+
 func Load() (*Config, error) {
-	return &Config{
+	cfg := &Config{
+		Env:            getEnv("RELAY_ENV", "development"),
 		Host:           getEnv("REALTIME_HOST", "0.0.0.0"),
 		Port:           getEnvInt("REALTIME_PORT", 8081),
 		LogLevel:       getEnv("RELAY_LOG_LEVEL", "debug"),
@@ -44,7 +65,34 @@ func Load() (*Config, error) {
 			Password: getEnv("VALKEY_PASSWORD", ""),
 			DB:       getEnvInt("VALKEY_DB", 0),
 		},
-	}, nil
+		Database: DatabaseConfig{
+			Host:            getEnv("DB_HOST", "localhost"),
+			Port:            getEnvInt("DB_PORT", 5432),
+			User:            getEnv("DB_USER", "relayforge"),
+			Password:        getEnv("DB_PASSWORD", "relayforge_dev"),
+			Name:            getEnv("DB_NAME", "relayforge"),
+			SSLMode:         getEnv("DB_SSL_MODE", "disable"),
+			MaxOpenConns:    getEnvInt("DB_MAX_OPEN_CONNS", 25),
+			MaxIdleConns:    getEnvInt("DB_MAX_IDLE_CONNS", 5),
+			ConnMaxLifetime: getEnvDuration("DB_CONN_MAX_LIFETIME", 300*time.Second),
+		},
+	}
+
+	if cfg.JWTSecret == "change-me-in-production" && cfg.Env == "production" {
+		return nil, fmt.Errorf("AUTH_JWT_SECRET must be set in production")
+	}
+	if cfg.Env == "production" {
+		if len(cfg.AllowedOrigins) == 0 {
+			return nil, fmt.Errorf("REALTIME_ALLOWED_ORIGINS must be set in production")
+		}
+		for _, origin := range cfg.AllowedOrigins {
+			if origin == "*" {
+				return nil, fmt.Errorf("REALTIME_ALLOWED_ORIGINS cannot contain * in production")
+			}
+		}
+	}
+
+	return cfg, nil
 }
 
 func getEnv(key, fallback string) string {
@@ -58,6 +106,18 @@ func getEnvInt(key string, fallback int) int {
 	if v := os.Getenv(key); v != "" {
 		if i, err := strconv.Atoi(v); err == nil {
 			return i
+		}
+	}
+	return fallback
+}
+
+func getEnvDuration(key string, fallback time.Duration) time.Duration {
+	if v := os.Getenv(key); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
+		if seconds, err := strconv.Atoi(v); err == nil {
+			return time.Duration(seconds) * time.Second
 		}
 	}
 	return fallback

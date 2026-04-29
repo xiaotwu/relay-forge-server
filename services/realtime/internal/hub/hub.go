@@ -1,27 +1,35 @@
 package hub
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog/log"
 
 	"github.com/relay-forge/relay-forge/services/realtime/internal/config"
 )
 
 const (
-	writeWait      = 10 * time.Second
-	pongWait       = 60 * time.Second
-	pingPeriod     = (pongWait * 9) / 10
-	maxMessageSize = 4096
+	writeWait       = 10 * time.Second
+	pongWait        = 60 * time.Second
+	pingPeriod      = (pongWait * 9) / 10
+	authCheckPeriod = 30 * time.Second
+	maxMessageSize  = 4096
 )
+
+const EventsChannel = "relayforge.events"
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
@@ -31,17 +39,19 @@ var upgrader = websocket.Upgrader{
 
 // Event types sent over WebSocket
 const (
-	EventMessage       = "message.create"
-	EventMessageUpdate = "message.update"
-	EventMessageDelete = "message.delete"
-	EventTypingStart   = "typing.start"
-	EventTypingStop    = "typing.stop"
-	EventPresence      = "presence.update"
-	EventReadState     = "read_state.update"
-	EventGuildUpdate   = "guild.update"
-	EventChannelUpdate = "channel.update"
-	EventMemberJoin    = "member.join"
-	EventMemberLeave   = "member.leave"
+	EventMessage       = "MESSAGE_CREATE"
+	EventMessageUpdate = "MESSAGE_UPDATE"
+	EventMessageDelete = "MESSAGE_DELETE"
+	EventTypingStart   = "TYPING_START"
+	EventTypingStop    = "TYPING_STOP"
+	EventPresence      = "PRESENCE_UPDATE"
+	EventReadState     = "READ_STATE_UPDATE"
+	EventGuildUpdate   = "GUILD_UPDATE"
+	EventChannelUpdate = "CHANNEL_UPDATE"
+	EventMemberJoin    = "GUILD_MEMBER_ADD"
+	EventMemberLeave   = "GUILD_MEMBER_REMOVE"
+	EventHeartbeat     = "HEARTBEAT"
+	EventHeartbeatAck  = "HEARTBEAT_ACK"
 )
 
 type Event struct {
@@ -50,6 +60,20 @@ type Event struct {
 	GuildID   string          `json:"guild_id,omitempty"`
 	UserID    string          `json:"user_id,omitempty"`
 	Data      json.RawMessage `json:"data,omitempty"`
+}
+
+type pubsubEvent struct {
+	Type    string          `json:"type"`
+	GuildID *uuid.UUID      `json:"guild_id,omitempty"`
+	UserIDs []uuid.UUID     `json:"user_ids,omitempty"`
+	Data    json.RawMessage `json:"data,omitempty"`
+}
+
+type outboundEnvelope struct {
+	Type      string          `json:"type"`
+	Data      json.RawMessage `json:"data,omitempty"`
+	Seq       int64           `json:"seq"`
+	Timestamp string          `json:"timestamp"`
 }
 
 type Client struct {
@@ -63,12 +87,16 @@ type Client struct {
 
 type Hub struct {
 	cfg        *config.Config
+	db         *pgxpool.Pool
+	redis      *redis.Client
 	clients    map[uuid.UUID]map[*Client]bool // userID -> set of clients
 	guilds     map[uuid.UUID]map[*Client]bool // guildID -> set of clients
 	register   chan *Client
 	unregister chan *Client
 	broadcast  chan *guildMessage
+	userActive func(context.Context, uuid.UUID) (bool, error)
 	mu         sync.RWMutex
+	seq        atomic.Int64
 	quit       chan struct{}
 }
 
@@ -85,9 +113,15 @@ type typingPayload struct {
 	Timestamp string `json:"timestamp,omitempty"`
 }
 
-func New(cfg *config.Config) *Hub {
-	return &Hub{
-		cfg:        cfg,
+func New(cfg *config.Config, db *pgxpool.Pool) *Hub {
+	h := &Hub{
+		cfg: cfg,
+		db:  db,
+		redis: redis.NewClient(&redis.Options{
+			Addr:     cfg.Valkey.Addr(),
+			Password: cfg.Valkey.Password,
+			DB:       cfg.Valkey.DB,
+		}),
 		clients:    make(map[uuid.UUID]map[*Client]bool),
 		guilds:     make(map[uuid.UUID]map[*Client]bool),
 		register:   make(chan *Client, 256),
@@ -95,6 +129,8 @@ func New(cfg *config.Config) *Hub {
 		broadcast:  make(chan *guildMessage, 4096),
 		quit:       make(chan struct{}),
 	}
+	h.userActive = h.isUserActive
+	return h
 }
 
 func (h *Hub) Run() {
@@ -155,10 +191,15 @@ func (h *Hub) Run() {
 
 func (h *Hub) Shutdown() {
 	close(h.quit)
+	if h.redis != nil {
+		if err := h.redis.Close(); err != nil {
+			log.Warn().Err(err).Msg("failed to close valkey client")
+		}
+	}
 }
 
 func (h *Hub) BroadcastToGuild(guildID uuid.UUID, event Event) {
-	data, err := json.Marshal(event)
+	data, err := h.buildEnvelope(event.Type, event.Data)
 	if err != nil {
 		log.Error().Err(err).Msg("failed to marshal broadcast event")
 		return
@@ -167,7 +208,7 @@ func (h *Hub) BroadcastToGuild(guildID uuid.UUID, event Event) {
 }
 
 func (h *Hub) SendToUser(userID uuid.UUID, event Event) {
-	data, err := json.Marshal(event)
+	data, err := h.buildEnvelope(event.Type, event.Data)
 	if err != nil {
 		log.Error().Err(err).Msg("failed to marshal user event")
 		return
@@ -183,6 +224,66 @@ func (h *Hub) SendToUser(userID uuid.UUID, event Event) {
 	h.mu.RUnlock()
 }
 
+func (h *Hub) Subscribe(ctx context.Context) {
+	if h.redis == nil {
+		return
+	}
+
+	pubsub := h.redis.Subscribe(ctx, EventsChannel)
+	defer func() {
+		if err := pubsub.Close(); err != nil {
+			log.Warn().Err(err).Msg("failed to close valkey pubsub")
+		}
+	}()
+
+	if _, err := pubsub.Receive(ctx); err != nil {
+		log.Warn().Err(err).Msg("failed to subscribe to realtime events")
+		return
+	}
+
+	ch := pubsub.Channel()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg, ok := <-ch:
+			if !ok {
+				return
+			}
+			h.handlePubSubMessage(msg.Payload)
+		}
+	}
+}
+
+func (h *Hub) handlePubSubMessage(payload string) {
+	var event pubsubEvent
+	if err := json.Unmarshal([]byte(payload), &event); err != nil {
+		log.Warn().Err(err).Msg("failed to decode realtime event")
+		return
+	}
+	event.Type = normalizeEventType(event.Type)
+	if event.Type == "" {
+		return
+	}
+
+	wsEvent := Event{Type: event.Type, Data: event.Data}
+	if event.GuildID != nil {
+		h.BroadcastToGuild(*event.GuildID, wsEvent)
+	}
+	for _, userID := range event.UserIDs {
+		h.SendToUser(userID, wsEvent)
+	}
+}
+
+func (h *Hub) buildEnvelope(eventType string, data json.RawMessage) ([]byte, error) {
+	return json.Marshal(outboundEnvelope{
+		Type:      normalizeEventType(eventType),
+		Data:      data,
+		Seq:       h.seq.Add(1),
+		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
+	})
+}
+
 func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	if origin := r.Header.Get("Origin"); origin != "" && !h.isOriginAllowed(origin) {
 		http.Error(w, "origin not allowed", http.StatusForbidden)
@@ -195,7 +296,7 @@ func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID, err := h.validateToken(tokenStr)
+	userID, err := h.validateToken(r.Context(), tokenStr)
 	if err != nil {
 		http.Error(w, "invalid token", http.StatusUnauthorized)
 		return
@@ -210,7 +311,16 @@ func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// Parse guild IDs from query parameter
 	guildIDs := make(map[uuid.UUID]bool)
 	for _, gidStr := range r.URL.Query()["guilds"] {
-		if gid, err := uuid.Parse(gidStr); err == nil {
+		gid, err := uuid.Parse(gidStr)
+		if err != nil {
+			continue
+		}
+		isMember, err := h.isGuildMember(r.Context(), gid, userID)
+		if err != nil {
+			log.Warn().Err(err).Str("guild_id", gid.String()).Str("user_id", userID.String()).Msg("failed to validate websocket guild subscription")
+			continue
+		}
+		if isMember {
 			guildIDs[gid] = true
 		}
 	}
@@ -230,7 +340,7 @@ func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	go client.readPump()
 }
 
-func (h *Hub) validateToken(tokenStr string) (uuid.UUID, error) {
+func (h *Hub) validateToken(ctx context.Context, tokenStr string) (uuid.UUID, error) {
 	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, jwt.ErrSignatureInvalid
@@ -251,7 +361,19 @@ func (h *Hub) validateToken(tokenStr string) (uuid.UUID, error) {
 		return uuid.Nil, err
 	}
 
-	return uuid.Parse(sub)
+	userID, err := uuid.Parse(sub)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	active, err := h.isClientActive(ctx, userID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if !active {
+		return uuid.Nil, fmt.Errorf("user disabled or not found")
+	}
+
+	return userID, nil
 }
 
 func (c *Client) readPump() {
@@ -296,8 +418,10 @@ func (c *Client) readPump() {
 
 func (c *Client) writePump() {
 	ticker := time.NewTicker(pingPeriod)
+	authTicker := time.NewTicker(authCheckPeriod)
 	defer func() {
 		ticker.Stop()
+		authTicker.Stop()
 		if err := c.conn.Close(); err != nil {
 			log.Warn().Err(err).Str("user_id", c.userID.String()).Msg("failed to close websocket connection")
 		}
@@ -327,6 +451,14 @@ func (c *Client) writePump() {
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
+		case <-authTicker.C:
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			active, err := c.hub.isClientActive(ctx, c.userID)
+			cancel()
+			if err != nil || !active {
+				log.Info().Str("user_id", c.userID.String()).Err(err).Msg("closing websocket for inactive user")
+				return
+			}
 		}
 	}
 }
@@ -348,19 +480,46 @@ func (c *Client) handleEvent(event Event) {
 		for gid := range c.guildIDs {
 			c.hub.BroadcastToGuild(gid, event)
 		}
+	case EventHeartbeat:
+		c.hub.SendToUser(c.userID, Event{
+			Type: EventHeartbeatAck,
+			Data: event.Data,
+		})
 	}
 }
 
 func normalizeEventType(eventType string) string {
 	switch strings.ToUpper(eventType) {
+	case "MESSAGE.CREATE", "MESSAGE_CREATE":
+		return EventMessage
+	case "MESSAGE.UPDATE", "MESSAGE_UPDATE":
+		return EventMessageUpdate
+	case "MESSAGE.DELETE", "MESSAGE_DELETE":
+		return EventMessageDelete
 	case "TYPING_START":
 		return EventTypingStart
 	case "TYPING_STOP":
 		return EventTypingStop
-	case "READ_STATE_UPDATE":
+	case "TYPING.START":
+		return EventTypingStart
+	case "TYPING.STOP":
+		return EventTypingStop
+	case "READ_STATE.UPDATE", "READ_STATE_UPDATE":
 		return EventReadState
 	case "PRESENCE_UPDATE":
 		return EventPresence
+	case "PRESENCE.UPDATE":
+		return EventPresence
+	case "HEARTBEAT":
+		return EventHeartbeat
+	case "HEARTBEAT_ACK":
+		return EventHeartbeatAck
+	case "DM.MESSAGE.CREATE", "DM_MESSAGE.CREATE", "DM_MESSAGE_CREATE":
+		return "DM_MESSAGE_CREATE"
+	case "DM.MESSAGE.UPDATE", "DM_MESSAGE.UPDATE", "DM_MESSAGE_UPDATE":
+		return "DM_MESSAGE_UPDATE"
+	case "DM.MESSAGE.DELETE", "DM_MESSAGE.DELETE", "DM_MESSAGE_DELETE":
+		return "DM_MESSAGE_DELETE"
 	default:
 		return eventType
 	}
@@ -406,6 +565,46 @@ func buildTypingBroadcast(event Event) (Event, bool) {
 		UserID:    payload.UserID,
 		Data:      data,
 	}, true
+}
+
+func (h *Hub) isGuildMember(ctx context.Context, guildID, userID uuid.UUID) (bool, error) {
+	if h.db == nil {
+		return false, nil
+	}
+
+	var exists bool
+	err := h.db.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM guild_members
+			WHERE guild_id = $1 AND user_id = $2
+		)`,
+		guildID,
+		userID,
+	).Scan(&exists)
+	return exists, err
+}
+
+func (h *Hub) isUserActive(ctx context.Context, userID uuid.UUID) (bool, error) {
+	if h.db == nil {
+		return true, nil
+	}
+
+	var exists bool
+	err := h.db.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM users WHERE id = $1 AND is_disabled = false
+		)`,
+		userID,
+	).Scan(&exists)
+	return exists, err
+}
+
+func (h *Hub) isClientActive(ctx context.Context, userID uuid.UUID) (bool, error) {
+	if h.userActive == nil {
+		return true, nil
+	}
+	return h.userActive(ctx, userID)
 }
 
 func (h *Hub) isOriginAllowed(origin string) bool {

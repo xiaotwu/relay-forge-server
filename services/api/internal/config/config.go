@@ -226,6 +226,16 @@ func Load() (*Config, error) {
 	if cfg.Auth.JWTSecret == "change-me-in-production" && cfg.Env == "production" {
 		return nil, fmt.Errorf("AUTH_JWT_SECRET must be set in production")
 	}
+	if cfg.Env == "production" {
+		if len(cfg.CORS.Origins) == 0 {
+			return nil, fmt.Errorf("API_CORS_ORIGINS must be set in production")
+		}
+		for _, origin := range cfg.CORS.Origins {
+			if origin == "*" {
+				return nil, fmt.Errorf("API_CORS_ORIGINS cannot contain * in production")
+			}
+		}
+	}
 
 	return cfg, nil
 }

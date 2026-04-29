@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"time"
@@ -13,6 +14,7 @@ type Config struct {
 	LogLevel  string
 	LogFormat string
 	CORS      CORSConfig
+	Database  DatabaseConfig
 	Auth      AuthConfig
 	S3        S3Config
 	LiveKit   LiveKitConfig
@@ -22,6 +24,23 @@ type Config struct {
 
 type CORSConfig struct {
 	Origins []string
+}
+
+type DatabaseConfig struct {
+	Host            string
+	Port            int
+	User            string
+	Password        string
+	Name            string
+	SSLMode         string
+	MaxOpenConns    int
+	MaxIdleConns    int
+	ConnMaxLifetime time.Duration
+}
+
+func (c DatabaseConfig) DSN() string {
+	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
+		c.User, c.Password, c.Host, c.Port, c.Name, c.SSLMode)
 }
 
 type AuthConfig struct {
@@ -59,7 +78,7 @@ type AntivirusConfig struct {
 }
 
 func Load() (*Config, error) {
-	return &Config{
+	cfg := &Config{
 		Host:      getEnv("MEDIA_HOST", "0.0.0.0"),
 		Port:      getEnvInt("MEDIA_PORT", 8082),
 		Env:       getEnv("RELAY_ENV", "development"),
@@ -67,6 +86,17 @@ func Load() (*Config, error) {
 		LogFormat: getEnv("RELAY_LOG_FORMAT", "console"),
 		CORS: CORSConfig{
 			Origins: splitCSV(getEnv("MEDIA_CORS_ORIGINS", "http://localhost:3000,http://localhost:5174")),
+		},
+		Database: DatabaseConfig{
+			Host:            getEnv("DB_HOST", "localhost"),
+			Port:            getEnvInt("DB_PORT", 5432),
+			User:            getEnv("DB_USER", "relayforge"),
+			Password:        getEnv("DB_PASSWORD", "relayforge_dev"),
+			Name:            getEnv("DB_NAME", "relayforge"),
+			SSLMode:         getEnv("DB_SSL_MODE", "disable"),
+			MaxOpenConns:    getEnvInt("DB_MAX_OPEN_CONNS", 25),
+			MaxIdleConns:    getEnvInt("DB_MAX_IDLE_CONNS", 5),
+			ConnMaxLifetime: getEnvDuration("DB_CONN_MAX_LIFETIME", 300*time.Second),
 		},
 		Auth: AuthConfig{
 			JWTSecret: getEnv("AUTH_JWT_SECRET", "change-me-in-production"),
@@ -97,7 +127,23 @@ func Load() (*Config, error) {
 			Host:    getEnv("ANTIVIRUS_HOST", "localhost"),
 			Port:    getEnvInt("ANTIVIRUS_PORT", 3310),
 		},
-	}, nil
+	}
+
+	if cfg.Auth.JWTSecret == "change-me-in-production" && cfg.Env == "production" {
+		return nil, fmt.Errorf("AUTH_JWT_SECRET must be set in production")
+	}
+	if cfg.Env == "production" {
+		if len(cfg.CORS.Origins) == 0 {
+			return nil, fmt.Errorf("MEDIA_CORS_ORIGINS must be set in production")
+		}
+		for _, origin := range cfg.CORS.Origins {
+			if origin == "*" {
+				return nil, fmt.Errorf("MEDIA_CORS_ORIGINS cannot contain * in production")
+			}
+		}
+	}
+
+	return cfg, nil
 }
 
 func getEnv(key, fallback string) string {

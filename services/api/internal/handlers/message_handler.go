@@ -11,6 +11,7 @@ import (
 	apperrors "github.com/relay-forge/relay-forge/services/api/internal/errors"
 	"github.com/relay-forge/relay-forge/services/api/internal/middleware"
 	"github.com/relay-forge/relay-forge/services/api/internal/models"
+	apirealtime "github.com/relay-forge/relay-forge/services/api/internal/realtime"
 	"github.com/relay-forge/relay-forge/services/api/internal/repository"
 )
 
@@ -19,6 +20,7 @@ type MessageHandler struct {
 	messageRepo *repository.MessageRepository
 	channelRepo *repository.ChannelRepository
 	guildRepo   *repository.GuildRepository
+	publisher   *apirealtime.Publisher
 }
 
 // NewMessageHandler creates a new MessageHandler.
@@ -26,11 +28,17 @@ func NewMessageHandler(
 	messageRepo *repository.MessageRepository,
 	channelRepo *repository.ChannelRepository,
 	guildRepo *repository.GuildRepository,
+	publishers ...*apirealtime.Publisher,
 ) *MessageHandler {
+	var publisher *apirealtime.Publisher
+	if len(publishers) > 0 {
+		publisher = publishers[0]
+	}
 	return &MessageHandler{
 		messageRepo: messageRepo,
 		channelRepo: channelRepo,
 		guildRepo:   guildRepo,
+		publisher:   publisher,
 	}
 }
 
@@ -49,12 +57,34 @@ type addReactionRequest struct {
 	Emoji string `json:"emoji"`
 }
 
+func (h *MessageHandler) requireChannelMember(r *http.Request, channelID, userID uuid.UUID) (*models.Channel, error) {
+	channel, err := h.channelRepo.GetByID(r.Context(), channelID)
+	if err != nil {
+		return nil, err
+	}
+
+	isMember, err := h.guildRepo.IsMember(r.Context(), channel.GuildID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !isMember {
+		return nil, apperrors.Forbidden("must be a guild member to access this channel")
+	}
+
+	return channel, nil
+}
+
 // -- Handlers ----------------------------------------------------------------
 
 // ListMessages returns messages in a channel with cursor-based pagination.
 func (h *MessageHandler) ListMessages(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
 	channelID, err := parseUUID(chi.URLParam(r, "channelID"))
 	if err != nil {
+		respondError(w, err)
+		return
+	}
+	if _, err := h.requireChannelMember(r, channelID, userID); err != nil {
 		respondError(w, err)
 		return
 	}
@@ -92,21 +122,9 @@ func (h *MessageHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify channel exists.
-	channel, err := h.channelRepo.GetByID(r.Context(), channelID)
+	channel, err := h.requireChannelMember(r, channelID, userID)
 	if err != nil {
 		respondError(w, err)
-		return
-	}
-
-	// Verify the user is a member of the guild.
-	isMember, err := h.guildRepo.IsMember(r.Context(), channel.GuildID, userID)
-	if err != nil {
-		respondError(w, err)
-		return
-	}
-	if !isMember {
-		respondError(w, apperrors.Forbidden("must be a guild member to send messages"))
 		return
 	}
 
@@ -125,12 +143,26 @@ func (h *MessageHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.publisher.Publish(r.Context(), apirealtime.Event{
+		Type:    "MESSAGE_CREATE",
+		GuildID: &channel.GuildID,
+		Data: apirealtime.MustRaw(map[string]any{
+			"message":  msg,
+			"guild_id": channel.GuildID,
+		}),
+	})
+
 	respondJSON(w, http.StatusCreated, msg)
 }
 
 // EditMessage edits an existing message. Only the author can edit.
 func (h *MessageHandler) EditMessage(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
+	channelID, err := parseUUID(chi.URLParam(r, "channelID"))
+	if err != nil {
+		respondError(w, err)
+		return
+	}
 	messageID, err := parseUUID(chi.URLParam(r, "messageID"))
 	if err != nil {
 		respondError(w, err)
@@ -145,6 +177,15 @@ func (h *MessageHandler) EditMessage(w http.ResponseWriter, r *http.Request) {
 
 	if msg.AuthorID != userID {
 		respondError(w, apperrors.Forbidden("can only edit your own messages"))
+		return
+	}
+	if msg.ChannelID != channelID {
+		respondError(w, apperrors.NotFound("message not found in this channel"))
+		return
+	}
+	channel, err := h.requireChannelMember(r, channelID, userID)
+	if err != nil {
+		respondError(w, err)
 		return
 	}
 
@@ -166,12 +207,26 @@ func (h *MessageHandler) EditMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.publisher.Publish(r.Context(), apirealtime.Event{
+		Type:    "MESSAGE_UPDATE",
+		GuildID: &channel.GuildID,
+		Data: apirealtime.MustRaw(map[string]any{
+			"message":  msg,
+			"guild_id": channel.GuildID,
+		}),
+	})
+
 	respondJSON(w, http.StatusOK, msg)
 }
 
 // DeleteMessage deletes a message. Only the author can delete.
 func (h *MessageHandler) DeleteMessage(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
+	channelID, err := parseUUID(chi.URLParam(r, "channelID"))
+	if err != nil {
+		respondError(w, err)
+		return
+	}
 	messageID, err := parseUUID(chi.URLParam(r, "messageID"))
 	if err != nil {
 		respondError(w, err)
@@ -188,17 +243,37 @@ func (h *MessageHandler) DeleteMessage(w http.ResponseWriter, r *http.Request) {
 		respondError(w, apperrors.Forbidden("can only delete your own messages"))
 		return
 	}
+	if msg.ChannelID != channelID {
+		respondError(w, apperrors.NotFound("message not found in this channel"))
+		return
+	}
+	channel, err := h.requireChannelMember(r, channelID, userID)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
 
 	if err := h.messageRepo.SoftDelete(r.Context(), messageID); err != nil {
 		respondError(w, err)
 		return
 	}
 
+	h.publisher.Publish(r.Context(), apirealtime.Event{
+		Type:    "MESSAGE_DELETE",
+		GuildID: &channel.GuildID,
+		Data: apirealtime.MustRaw(map[string]any{
+			"message_id": messageID,
+			"channel_id": channelID,
+			"guild_id":   channel.GuildID,
+		}),
+	})
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
 // SearchMessages searches messages in a channel.
 func (h *MessageHandler) SearchMessages(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
 	channelID, err := parseUUID(chi.URLParam(r, "channelID"))
 	if err != nil {
 		respondError(w, err)
@@ -208,6 +283,10 @@ func (h *MessageHandler) SearchMessages(w http.ResponseWriter, r *http.Request) 
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
 	if query == "" {
 		respondError(w, apperrors.Validation("q query parameter is required", nil))
+		return
+	}
+	if _, err := h.requireChannelMember(r, channelID, userID); err != nil {
+		respondError(w, err)
 		return
 	}
 
@@ -224,8 +303,13 @@ func (h *MessageHandler) SearchMessages(w http.ResponseWriter, r *http.Request) 
 
 // ListPins returns pinned messages in a channel.
 func (h *MessageHandler) ListPins(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
 	channelID, err := parseUUID(chi.URLParam(r, "channelID"))
 	if err != nil {
+		respondError(w, err)
+		return
+	}
+	if _, err := h.requireChannelMember(r, channelID, userID); err != nil {
 		respondError(w, err)
 		return
 	}
@@ -250,6 +334,10 @@ func (h *MessageHandler) PinMessage(w http.ResponseWriter, r *http.Request) {
 
 	messageID, err := parseUUID(chi.URLParam(r, "messageID"))
 	if err != nil {
+		respondError(w, err)
+		return
+	}
+	if _, err := h.requireChannelMember(r, channelID, userID); err != nil {
 		respondError(w, err)
 		return
 	}
@@ -286,6 +374,10 @@ func (h *MessageHandler) UnpinMessage(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
+	if _, err := h.requireChannelMember(r, channelID, middleware.GetUserID(r.Context())); err != nil {
+		respondError(w, err)
+		return
+	}
 
 	if err := h.messageRepo.Unpin(r.Context(), channelID, messageID); err != nil {
 		respondError(w, err)
@@ -297,25 +389,52 @@ func (h *MessageHandler) UnpinMessage(w http.ResponseWriter, r *http.Request) {
 
 // AddReaction adds a reaction to a message.
 func (h *MessageHandler) AddReaction(w http.ResponseWriter, r *http.Request) {
+	var req addReactionRequest
+	if err := decodeJSON(r, &req); err != nil {
+		respondError(w, err)
+		return
+	}
+	h.addReactionValue(w, r, req.Emoji)
+}
+
+// AddReactionByEmoji adds a reaction encoded in the request path.
+func (h *MessageHandler) AddReactionByEmoji(w http.ResponseWriter, r *http.Request) {
+	h.addReactionValue(w, r, chi.URLParam(r, "emoji"))
+}
+
+func (h *MessageHandler) addReactionValue(w http.ResponseWriter, r *http.Request, emoji string) {
 	userID := middleware.GetUserID(r.Context())
+	channelID, err := parseUUID(chi.URLParam(r, "channelID"))
+	if err != nil {
+		respondError(w, err)
+		return
+	}
 	messageID, err := parseUUID(chi.URLParam(r, "messageID"))
 	if err != nil {
 		respondError(w, err)
 		return
 	}
 
-	var req addReactionRequest
-	if err := decodeJSON(r, &req); err != nil {
+	if emoji == "" {
+		respondError(w, apperrors.Validation("emoji is required", nil))
+		return
+	}
+	if _, err := h.requireChannelMember(r, channelID, userID); err != nil {
 		respondError(w, err)
 		return
 	}
 
-	if req.Emoji == "" {
-		respondError(w, apperrors.Validation("emoji is required", nil))
+	msg, err := h.messageRepo.GetByID(r.Context(), messageID)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	if msg.ChannelID != channelID {
+		respondError(w, apperrors.NotFound("message not found in this channel"))
 		return
 	}
 
-	if err := h.messageRepo.AddReaction(r.Context(), messageID, userID, nil, req.Emoji); err != nil {
+	if err := h.messageRepo.AddReaction(r.Context(), messageID, userID, nil, emoji); err != nil {
 		respondError(w, err)
 		return
 	}
@@ -326,6 +445,11 @@ func (h *MessageHandler) AddReaction(w http.ResponseWriter, r *http.Request) {
 // RemoveReaction removes a reaction from a message.
 func (h *MessageHandler) RemoveReaction(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
+	channelID, err := parseUUID(chi.URLParam(r, "channelID"))
+	if err != nil {
+		respondError(w, err)
+		return
+	}
 	messageID, err := parseUUID(chi.URLParam(r, "messageID"))
 	if err != nil {
 		respondError(w, err)
@@ -335,6 +459,20 @@ func (h *MessageHandler) RemoveReaction(w http.ResponseWriter, r *http.Request) 
 	emoji := chi.URLParam(r, "emoji")
 	if emoji == "" {
 		respondError(w, apperrors.Validation("emoji is required", nil))
+		return
+	}
+	if _, err := h.requireChannelMember(r, channelID, userID); err != nil {
+		respondError(w, err)
+		return
+	}
+
+	msg, err := h.messageRepo.GetByID(r.Context(), messageID)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	if msg.ChannelID != channelID {
+		respondError(w, apperrors.NotFound("message not found in this channel"))
 		return
 	}
 

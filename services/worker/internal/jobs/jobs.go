@@ -105,11 +105,11 @@ func ProcessPendingFileScans(cfg *config.Config) func(ctx context.Context) error
 		}
 		defer pool.Close()
 
-		// Mark pending scans as skipped if antivirus is not configured
-		// When antivirus is enabled, this would connect to ClamAV and scan files
+		// Mark stale pending scans as skipped if antivirus is not configured.
+		// When antivirus is enabled, this would connect to ClamAV and scan files.
 		result, err := pool.Exec(ctx, `
-			UPDATE file_uploads SET scan_status = 'skipped'
-			WHERE scan_status = 'pending'
+			UPDATE file_uploads SET status = 'skipped'
+			WHERE status = 'pending'
 			AND created_at < NOW() - INTERVAL '1 hour'`)
 		if err != nil {
 			return fmt.Errorf("failed to process file scans: %w", err)
@@ -132,13 +132,26 @@ func EnforceDataRetention(cfg *config.Config) func(ctx context.Context) error {
 		// Hard-delete soft-deleted messages older than 30 days
 		result, err := pool.Exec(ctx, `
 			DELETE FROM messages
-			WHERE deleted_at IS NOT NULL
+			WHERE is_deleted = true
+			AND deleted_at IS NOT NULL
 			AND deleted_at < NOW() - INTERVAL '30 days'`)
 		if err != nil {
 			return fmt.Errorf("failed to enforce retention on messages: %w", err)
 		}
 		if result.RowsAffected() > 0 {
 			log.Info().Int64("purged", result.RowsAffected()).Msg("purged old soft-deleted messages")
+		}
+
+		result, err = pool.Exec(ctx, `
+			DELETE FROM dm_messages
+			WHERE is_deleted = true
+			AND deleted_at IS NOT NULL
+			AND deleted_at < NOW() - INTERVAL '30 days'`)
+		if err != nil {
+			return fmt.Errorf("failed to enforce retention on direct messages: %w", err)
+		}
+		if result.RowsAffected() > 0 {
+			log.Info().Int64("purged", result.RowsAffected()).Msg("purged old soft-deleted direct messages")
 		}
 
 		// Hard-delete disabled users older than 90 days

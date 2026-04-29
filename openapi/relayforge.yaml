@@ -1,0 +1,900 @@
+openapi: 3.1.0
+info:
+  title: RelayForge API
+  version: 0.1.0
+  description: Backend-owned HTTP contract for RelayForge API, media, and voice services.
+servers:
+  - url: http://localhost:8080
+    description: API service
+  - url: http://localhost:8082
+    description: Media service
+security:
+  - BearerAuth: []
+paths:
+  /healthz:
+    get:
+      operationId: healthz
+      security: []
+      responses:
+        '200':
+          description: Healthy
+  /readyz:
+    get:
+      operationId: readyz
+      security: []
+      responses:
+        '200':
+          description: Ready
+  /api/v1/auth/register:
+    post:
+      operationId: authRegister
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          $ref: '#/components/responses/AuthTokens'
+  /api/v1/auth/login:
+    post:
+      operationId: authLogin
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/AuthTokens'
+  /api/v1/auth/refresh:
+    post:
+      operationId: authRefresh
+      security: []
+      responses:
+        '200':
+          $ref: '#/components/responses/AuthTokens'
+  /api/v1/auth/logout:
+    post:
+      operationId: authLogout
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/auth/password-reset/request:
+    post:
+      operationId: authPasswordResetRequest
+      security: []
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/auth/password-reset/confirm:
+    post:
+      operationId: authPasswordResetConfirm
+      security: []
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/users:
+    get:
+      operationId: usersSearch
+      parameters:
+        - name: q
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/users/me:
+    get:
+      operationId: usersMe
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+    patch:
+      operationId: usersUpdateMe
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/users/me/sessions:
+    get:
+      operationId: usersListSessions
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/users/me/sessions/{sessionID}:
+    delete:
+      operationId: usersRevokeSession
+      parameters:
+        - $ref: '#/components/parameters/SessionID'
+      responses:
+        '204':
+          description: Session revoked
+  /api/v1/users/me/2fa/enable:
+    post:
+      operationId: usersEnable2fa
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/users/me/2fa/verify:
+    post:
+      operationId: usersVerify2fa
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/users/me/2fa/disable:
+    post:
+      operationId: usersDisable2fa
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/users/{userID}:
+    get:
+      operationId: usersPublicProfile
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/guilds:
+    get:
+      operationId: guildsList
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+    post:
+      operationId: guildsCreate
+      responses:
+        '201':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/guilds/{guildID}:
+    get:
+      operationId: guildsGet
+      parameters:
+        - $ref: '#/components/parameters/GuildID'
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+    patch:
+      operationId: guildsUpdate
+      parameters:
+        - $ref: '#/components/parameters/GuildID'
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+    delete:
+      operationId: guildsDelete
+      parameters:
+        - $ref: '#/components/parameters/GuildID'
+      responses:
+        '204':
+          description: Guild deleted
+  /api/v1/guilds/{guildID}/members:
+    get:
+      operationId: guildMembersList
+      parameters:
+        - $ref: '#/components/parameters/GuildID'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+    post:
+      operationId: guildMembersJoin
+      parameters:
+        - $ref: '#/components/parameters/GuildID'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                invite_code:
+                  type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/guilds/{guildID}/members/{userID}:
+    delete:
+      operationId: guildMembersKick
+      parameters:
+        - $ref: '#/components/parameters/GuildID'
+        - $ref: '#/components/parameters/UserID'
+      responses:
+        '204':
+          description: Member removed
+  /api/v1/guilds/{guildID}/invites:
+    get:
+      operationId: guildInvitesList
+      parameters:
+        - $ref: '#/components/parameters/GuildID'
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+    post:
+      operationId: guildInvitesCreate
+      parameters:
+        - $ref: '#/components/parameters/GuildID'
+      responses:
+        '201':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/guilds/{guildID}/channels:
+    get:
+      operationId: channelsList
+      parameters:
+        - $ref: '#/components/parameters/GuildID'
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+    post:
+      operationId: channelsCreate
+      parameters:
+        - $ref: '#/components/parameters/GuildID'
+      responses:
+        '201':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/guilds/{guildID}/channels/{channelID}:
+    get:
+      operationId: channelsGet
+      parameters:
+        - $ref: '#/components/parameters/GuildID'
+        - $ref: '#/components/parameters/ChannelID'
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+    patch:
+      operationId: channelsUpdate
+      parameters:
+        - $ref: '#/components/parameters/GuildID'
+        - $ref: '#/components/parameters/ChannelID'
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+    delete:
+      operationId: channelsDelete
+      parameters:
+        - $ref: '#/components/parameters/GuildID'
+        - $ref: '#/components/parameters/ChannelID'
+      responses:
+        '204':
+          description: Channel deleted
+  /api/v1/guilds/{guildID}/roles:
+    get:
+      operationId: rolesList
+      parameters:
+        - $ref: '#/components/parameters/GuildID'
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+    post:
+      operationId: rolesCreate
+      parameters:
+        - $ref: '#/components/parameters/GuildID'
+      responses:
+        '201':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/guilds/{guildID}/roles/{roleID}:
+    patch:
+      operationId: rolesUpdate
+      parameters:
+        - $ref: '#/components/parameters/GuildID'
+        - $ref: '#/components/parameters/RoleID'
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+    delete:
+      operationId: rolesDelete
+      parameters:
+        - $ref: '#/components/parameters/GuildID'
+        - $ref: '#/components/parameters/RoleID'
+      responses:
+        '204':
+          description: Role deleted
+  /api/v1/guilds/{guildID}/roles/{roleID}/members/{userID}:
+    post:
+      operationId: rolesAssignMember
+      parameters:
+        - $ref: '#/components/parameters/GuildID'
+        - $ref: '#/components/parameters/RoleID'
+        - $ref: '#/components/parameters/UserID'
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+    delete:
+      operationId: rolesRemoveMember
+      parameters:
+        - $ref: '#/components/parameters/GuildID'
+        - $ref: '#/components/parameters/RoleID'
+        - $ref: '#/components/parameters/UserID'
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/channels/{channelID}/messages:
+    get:
+      operationId: messagesList
+      parameters:
+        - $ref: '#/components/parameters/ChannelID'
+        - $ref: '#/components/parameters/Limit'
+        - name: before
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+    post:
+      operationId: messagesCreate
+      parameters:
+        - $ref: '#/components/parameters/ChannelID'
+      responses:
+        '201':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/channels/{channelID}/messages/search:
+    get:
+      operationId: messagesSearch
+      parameters:
+        - $ref: '#/components/parameters/ChannelID'
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/channels/{channelID}/messages/pins:
+    get:
+      operationId: messagesPinsList
+      parameters:
+        - $ref: '#/components/parameters/ChannelID'
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/channels/{channelID}/messages/{messageID}:
+    patch:
+      operationId: messagesUpdate
+      parameters:
+        - $ref: '#/components/parameters/ChannelID'
+        - $ref: '#/components/parameters/MessageID'
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+    delete:
+      operationId: messagesDelete
+      parameters:
+        - $ref: '#/components/parameters/ChannelID'
+        - $ref: '#/components/parameters/MessageID'
+      responses:
+        '204':
+          description: Message deleted
+  /api/v1/channels/{channelID}/messages/{messageID}/pin:
+    post:
+      operationId: messagesPin
+      parameters:
+        - $ref: '#/components/parameters/ChannelID'
+        - $ref: '#/components/parameters/MessageID'
+      responses:
+        '204':
+          description: Message pinned
+    delete:
+      operationId: messagesUnpin
+      parameters:
+        - $ref: '#/components/parameters/ChannelID'
+        - $ref: '#/components/parameters/MessageID'
+      responses:
+        '204':
+          description: Message unpinned
+  /api/v1/channels/{channelID}/messages/{messageID}/reactions:
+    post:
+      operationId: messagesReactionAdd
+      parameters:
+        - $ref: '#/components/parameters/ChannelID'
+        - $ref: '#/components/parameters/MessageID'
+      responses:
+        '204':
+          description: Reaction added
+  /api/v1/channels/{channelID}/messages/{messageID}/reactions/{emoji}:
+    put:
+      operationId: messagesReactionAddByPath
+      parameters:
+        - $ref: '#/components/parameters/ChannelID'
+        - $ref: '#/components/parameters/MessageID'
+        - name: emoji
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Reaction added
+    delete:
+      operationId: messagesReactionRemove
+      parameters:
+        - $ref: '#/components/parameters/ChannelID'
+        - $ref: '#/components/parameters/MessageID'
+        - name: emoji
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Reaction removed
+  /api/v1/dms:
+    get:
+      operationId: dmsListChannels
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+    post:
+      operationId: dmsCreateChannel
+      responses:
+        '201':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/dms/{dmChannelID}:
+    patch:
+      operationId: dmsUpdateChannel
+      parameters:
+        - $ref: '#/components/parameters/DMChannelID'
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/dms/{dmChannelID}/messages:
+    get:
+      operationId: dmsListMessages
+      parameters:
+        - $ref: '#/components/parameters/DMChannelID'
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+    post:
+      operationId: dmsCreateMessage
+      parameters:
+        - $ref: '#/components/parameters/DMChannelID'
+      responses:
+        '201':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/dms/{dmChannelID}/messages/{messageID}:
+    delete:
+      operationId: dmsDeleteMessage
+      parameters:
+        - $ref: '#/components/parameters/DMChannelID'
+        - $ref: '#/components/parameters/MessageID'
+      responses:
+        '204':
+          description: DM message deleted
+  /api/v1/admin/dashboard/stats:
+    get:
+      operationId: adminDashboardStats
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/admin/dashboard/activity:
+    get:
+      operationId: adminDashboardActivity
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/admin/users:
+    get:
+      operationId: adminUsersList
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/admin/users/{userID}/disable:
+    post:
+      operationId: adminUsersDisable
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/admin/users/{userID}/enable:
+    post:
+      operationId: adminUsersEnable
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/admin/guilds:
+    get:
+      operationId: adminGuildsList
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/admin/guilds/{guildID}:
+    delete:
+      operationId: adminGuildsDelete
+      parameters:
+        - $ref: '#/components/parameters/GuildID'
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/admin/audit:
+    get:
+      operationId: adminAuditList
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: action
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/admin/reports:
+    get:
+      operationId: adminReportsList
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/admin/reports/{reportID}/resolve:
+    post:
+      operationId: adminReportsResolve
+      parameters:
+        - $ref: '#/components/parameters/ReportID'
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/admin/reports/{reportID}/dismiss:
+    post:
+      operationId: adminReportsDismiss
+      parameters:
+        - $ref: '#/components/parameters/ReportID'
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/admin/settings:
+    get:
+      operationId: adminSettingsGet
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+    post:
+      operationId: adminSettingsUpdate
+      responses:
+        '200':
+          $ref: '#/components/responses/Envelope'
+  /api/v1/media/upload/presign:
+    post:
+      operationId: mediaUploadPresign
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PresignUploadRequest'
+      responses:
+        '200':
+          description: Presigned upload details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PresignUploadResponse'
+  /api/v1/media/upload/complete:
+    post:
+      operationId: mediaUploadComplete
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteUploadRequest'
+      responses:
+        '200':
+          description: Completed upload metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompleteUploadResponse'
+  /api/v1/media/files/{fileID}:
+    get:
+      operationId: mediaFilesGet
+      security: []
+      parameters:
+        - name: fileID
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: token
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '307':
+          description: Temporary redirect to object storage
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+  /api/v1/voice/token:
+    post:
+      operationId: voiceToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VoiceTokenRequest'
+      responses:
+        '200':
+          description: LiveKit token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoiceTokenResponse'
+  /api/v1/voice/rooms:
+    get:
+      operationId: voiceRoomsList
+      responses:
+        '200':
+          description: Voice rooms
+    post:
+      operationId: voiceRoomsCreate
+      responses:
+        '200':
+          description: Voice room created
+  /api/v1/voice/rooms/{roomName}:
+    delete:
+      operationId: voiceRoomsDelete
+      parameters:
+        - name: roomName
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Voice room deleted
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    ChannelID:
+      name: channelID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    DMChannelID:
+      name: dmChannelID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    GuildID:
+      name: guildID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    MessageID:
+      name: messageID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ReportID:
+      name: reportID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    RoleID:
+      name: roleID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    SessionID:
+      name: sessionID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    UserID:
+      name: userID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+    Offset:
+      name: offset
+      in: query
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+  responses:
+    AuthTokens:
+      description: Authentication token envelope
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Envelope'
+    Envelope:
+      description: RelayForge response envelope
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Envelope'
+    Error:
+      description: Error response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+  schemas:
+    Envelope:
+      type: object
+      properties:
+        data: {}
+        meta: {}
+    ErrorEnvelope:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object
+    RegisterRequest:
+      type: object
+      required: [username, email, password]
+      properties:
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+        two_factor_code:
+          type: string
+    PresignUploadRequest:
+      type: object
+      required: [file_name, content_type, file_size]
+      properties:
+        file_name:
+          type: string
+        content_type:
+          type: string
+        file_size:
+          type: integer
+          format: int64
+    PresignUploadResponse:
+      type: object
+      required: [upload_url, file_id, key]
+      properties:
+        upload_url:
+          type: string
+        file_id:
+          type: string
+        key:
+          type: string
+    CompleteUploadRequest:
+      type: object
+      required: [file_id, key, file_name, content_type, file_size, owner_type, owner_id]
+      properties:
+        file_id:
+          type: string
+        key:
+          type: string
+        file_name:
+          type: string
+        content_type:
+          type: string
+        file_size:
+          type: integer
+          format: int64
+        owner_type:
+          type: string
+          enum: [dm_channel, channel, guild, user_profile]
+        owner_id:
+          type: string
+          format: uuid
+    CompleteUploadResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        file_id:
+          type: string
+        url:
+          type: string
+        proxy_url:
+          type: string
+        filename:
+          type: string
+        content_type:
+          type: string
+        size:
+          type: integer
+          format: int64
+        status:
+          type: string
+    VoiceTokenRequest:
+      type: object
+      required: [room_name, identity]
+      properties:
+        room_name:
+          type: string
+        identity:
+          type: string
+          format: uuid
+        display_name:
+          type: string
+        can_publish:
+          type: boolean
+        can_subscribe:
+          type: boolean
+    VoiceTokenResponse:
+      type: object
+      required: [token, url, expires_at]
+      properties:
+        token:
+          type: string
+        url:
+          type: string
+        expires_at:
+          type: integer
+          format: int64

@@ -70,7 +70,7 @@ func (r *MessageRepository) Update(ctx context.Context, msg *models.Message) err
 
 func (r *MessageRepository) SoftDelete(ctx context.Context, id uuid.UUID) error {
 	result, err := r.pool.Exec(ctx, `
-		UPDATE messages SET is_deleted = true WHERE id = $1 AND is_deleted = false`, id,
+		UPDATE messages SET is_deleted = true, deleted_at = NOW() WHERE id = $1 AND is_deleted = false`, id,
 	)
 	if err != nil {
 		return apperrors.Internal("failed to soft delete message")

@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/relay-forge/relay-forge/services/realtime/internal/config"
 	"github.com/relay-forge/relay-forge/services/realtime/internal/hub"
 	"github.com/rs/zerolog"
@@ -35,8 +36,25 @@ func main() {
 	setupLogger(cfg.LogLevel, cfg.LogFormat)
 	log.Info().Str("version", version).Str("build_time", buildTime).Msg("starting RelayForge Realtime")
 
-	h := hub.New(cfg)
+	poolConfig, err := pgxpool.ParseConfig(cfg.Database.DSN())
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to parse database config")
+	}
+	poolConfig.MaxConns = int32(cfg.Database.MaxOpenConns)
+	poolConfig.MinConns = int32(cfg.Database.MaxIdleConns)
+	poolConfig.MaxConnLifetime = cfg.Database.ConnMaxLifetime
+
+	db, err := pgxpool.NewWithConfig(context.Background(), poolConfig)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to connect to database")
+	}
+	defer db.Close()
+
+	h := hub.New(cfg, db)
+	pubsubCtx, stopPubsub := context.WithCancel(context.Background())
+	defer stopPubsub()
 	go h.Run()
+	go h.Subscribe(pubsubCtx)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", h.HandleWebSocket)
@@ -70,6 +88,7 @@ func main() {
 	log.Info().Msg("shutting down realtime server")
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+	stopPubsub()
 	h.Shutdown()
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Error().Err(err).Msg("server forced to shutdown")

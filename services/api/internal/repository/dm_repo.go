@@ -296,6 +296,34 @@ func (r *DMRepository) IsMember(ctx context.Context, channelID, userID uuid.UUID
 	return exists, nil
 }
 
+func (r *DMRepository) ListMemberIDs(ctx context.Context, channelID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT m.user_id
+		FROM dm_channel_members m
+		INNER JOIN users u ON u.id = m.user_id
+		WHERE m.dm_channel_id = $1 AND u.is_disabled = false`,
+		channelID,
+	)
+	if err != nil {
+		return nil, apperrors.Internal("failed to load direct message recipients")
+	}
+	defer rows.Close()
+
+	userIDs := make([]uuid.UUID, 0)
+	for rows.Next() {
+		var userID uuid.UUID
+		if err := rows.Scan(&userID); err != nil {
+			return nil, apperrors.Internal("failed to scan direct message recipient")
+		}
+		userIDs = append(userIDs, userID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, apperrors.Internal("failed to iterate direct message recipients")
+	}
+
+	return userIDs, nil
+}
+
 func (r *DMRepository) ListMessages(
 	ctx context.Context,
 	channelID uuid.UUID,
@@ -467,7 +495,7 @@ func (r *DMRepository) DeleteMessage(
 
 	result, err := r.pool.Exec(ctx, `
 		UPDATE dm_messages
-		SET is_deleted = true, edited_at = NOW()
+		SET is_deleted = true, deleted_at = NOW()
 		WHERE id = $1 AND dm_channel_id = $2 AND author_id = $3 AND is_deleted = false`,
 		messageID, channelID, userID,
 	)

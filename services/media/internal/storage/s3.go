@@ -69,6 +69,10 @@ func (s *S3Store) Delete(ctx context.Context, bucket, key string) error {
 	return s.client.RemoveObject(ctx, bucket, key, minio.RemoveObjectOptions{})
 }
 
+func (s *S3Store) Stat(ctx context.Context, bucket, key string) (minio.ObjectInfo, error) {
+	return s.client.StatObject(ctx, bucket, key, minio.StatObjectOptions{})
+}
+
 func (s *S3Store) PresignedPutURL(ctx context.Context, bucket, key string, expiry time.Duration) (string, error) {
 	u, err := s.client.PresignedPutObject(ctx, bucket, key, expiry)
 	if err != nil {

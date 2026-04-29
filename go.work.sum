@@ -1,3 +1,4 @@
+github.com/klauspost/cpuid/v2 v2.2.10/go.mod h1:hqwkgyIinND0mEev00jJYCxPNVRVXFQeu1XKlok6oO0=
 github.com/livekit/protocol v1.24.0/go.mod h1:nxRzmQBKSYK64gqr7ABWwt78hvrgiO2wYuCojRYb7Gs=
 github.com/livekit/server-sdk-go/v2 v2.3.0/go.mod h1:m2IukIyPCvJCdx04mdWIud9FoCBUAWc3526x3KgT8qY=
 github.com/valkey-io/valkey-go v1.0.47/go.mod h1:BXlVAPIL9rFQinSFM+N32JfWzfCaUAqBpZkc4vPY6fM=

@@ -14,9 +14,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
+	"github.com/relay-forge/relay-forge/services/media/internal/acl"
 	"github.com/relay-forge/relay-forge/services/media/internal/config"
 	"github.com/relay-forge/relay-forge/services/media/internal/handlers"
 	"github.com/relay-forge/relay-forge/services/media/internal/storage"
@@ -44,6 +46,31 @@ func main() {
 		log.Fatal().Err(err).Msg("failed to initialize storage")
 	}
 
+	dbConfig, err := pgxpool.ParseConfig(cfg.Database.DSN())
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to parse database config")
+	}
+	if cfg.Database.MaxOpenConns > 0 {
+		dbConfig.MaxConns = int32(cfg.Database.MaxOpenConns)
+	}
+	if cfg.Database.MaxIdleConns > 0 {
+		dbConfig.MinConns = int32(cfg.Database.MaxIdleConns)
+	}
+	dbConfig.MaxConnLifetime = cfg.Database.ConnMaxLifetime
+
+	db, err := pgxpool.NewWithConfig(context.Background(), dbConfig)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to connect database")
+	}
+	defer db.Close()
+
+	if err := db.Ping(context.Background()); err != nil {
+		log.Fatal().Err(err).Msg("failed to ping database")
+	}
+
+	aclStore := acl.NewPostgresStore(db)
+	aclService := acl.New(aclStore)
+
 	r := chi.NewRouter()
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   cfg.CORS.Origins,
@@ -62,13 +89,13 @@ func main() {
 		}
 	})
 
-	uploadHandler := handlers.NewUploadHandler(store, cfg)
+	uploadHandler := handlers.NewUploadHandler(store, cfg, aclStore, aclService)
 	livekitHandler := handlers.NewLiveKitHandler(cfg)
 
 	r.Route("/api/v1/media", func(r chi.Router) {
 		r.With(handlers.AuthRequired(cfg.Auth.JWTSecret)).Post("/upload/presign", uploadHandler.CreatePresignedUpload)
 		r.With(handlers.AuthRequired(cfg.Auth.JWTSecret)).Post("/upload/complete", uploadHandler.CompleteUpload)
-		r.Get("/files/{fileID}", uploadHandler.GetFile)
+		r.With(handlers.OptionalAuth(cfg.Auth.JWTSecret)).Get("/files/{fileID}", uploadHandler.GetFile)
 	})
 
 	r.Route("/api/v1/voice", func(r chi.Router) {

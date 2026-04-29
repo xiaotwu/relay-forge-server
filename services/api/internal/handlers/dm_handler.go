@@ -9,18 +9,29 @@ import (
 
 	apperrors "github.com/relay-forge/relay-forge/services/api/internal/errors"
 	"github.com/relay-forge/relay-forge/services/api/internal/middleware"
+	apirealtime "github.com/relay-forge/relay-forge/services/api/internal/realtime"
 	"github.com/relay-forge/relay-forge/services/api/internal/repository"
 )
 
 type DMHandler struct {
-	dmRepo   *repository.DMRepository
-	userRepo *repository.UserRepository
+	dmRepo    *repository.DMRepository
+	userRepo  *repository.UserRepository
+	publisher *apirealtime.Publisher
 }
 
-func NewDMHandler(dmRepo *repository.DMRepository, userRepo *repository.UserRepository) *DMHandler {
+func NewDMHandler(
+	dmRepo *repository.DMRepository,
+	userRepo *repository.UserRepository,
+	publishers ...*apirealtime.Publisher,
+) *DMHandler {
+	var publisher *apirealtime.Publisher
+	if len(publishers) > 0 {
+		publisher = publishers[0]
+	}
 	return &DMHandler{
-		dmRepo:   dmRepo,
-		userRepo: userRepo,
+		dmRepo:    dmRepo,
+		userRepo:  userRepo,
+		publisher: publisher,
 	}
 }
 
@@ -178,6 +189,11 @@ func (h *DMHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.publishDMEvent(r, "DM_MESSAGE_CREATE", channelID, map[string]any{
+		"message":    message,
+		"channel_id": channelID,
+	})
+
 	respondJSON(w, http.StatusCreated, message)
 }
 
@@ -205,5 +221,22 @@ func (h *DMHandler) DeleteMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.publishDMEvent(r, "DM_MESSAGE_DELETE", channelID, map[string]any{
+		"message_id": messageID,
+		"channel_id": channelID,
+	})
+
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *DMHandler) publishDMEvent(r *http.Request, eventType string, channelID uuid.UUID, payload map[string]any) {
+	recipients, err := h.dmRepo.ListMemberIDs(r.Context(), channelID)
+	if err != nil {
+		return
+	}
+	h.publisher.Publish(r.Context(), apirealtime.Event{
+		Type:    eventType,
+		UserIDs: recipients,
+		Data:    apirealtime.MustRaw(payload),
+	})
 }
